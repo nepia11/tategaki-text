@@ -163,6 +163,8 @@ class TategakiTextUtil:
         location = self.calc_grid_location(mx, my, gx, gy)
         str_type = self.decision_special_character(character)
         if str_type == "upper_right":
+            # bound_boxの更新が遅延するためupdateする
+            bpy.context.view_layer.update()
             logger.debug(character)
             bound_box = text_object.bound_box
             center = self.calc_bound_box_center_location(bound_box)
