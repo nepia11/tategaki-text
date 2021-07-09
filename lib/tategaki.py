@@ -4,6 +4,7 @@ from logging import getLogger
 from .util import random_name
 import mathutils
 from math import pi
+import os
 
 
 logger = getLogger(__name__)
@@ -11,16 +12,29 @@ logger = getLogger(__name__)
 translation = bpy.app.translations.pgettext
 
 
+def load_fonts():
+    path = os.path.dirname(__file__)
+    fonts_dir = os.path.join(path, "fonts")
+    fonts_name = os.listdir(fonts_dir)
+    for name in fonts_name:
+        if not bpy.data.fonts.find("name") == -1:
+            continue
+        _path = os.path.join(fonts_dir, name)
+        bpy.ops.font.open(relative_path=False, filepath=_path)
+        bpy.data.fonts[name].use_fake_user = True
+
+
 class TategakiTextUtil:
     """縦書きテキスト用のutilとかをまとめておく"""
 
+    """utilities"""
     # 特殊文字の判定
     @staticmethod
     def decision_special_character(single_str: str):
         """文字のタイプを判定して返す"""
         if single_str in "、。,.":
             return "upper_right"
-        elif single_str in "[]()<>＜＞「」｛｝{}-ー―=＝~〜":
+        elif single_str in "[]()<>＜＞「」｛｝{}-ー―=＝~〜…":
             return "rotation"
         else:
             return "normal"
@@ -60,13 +74,17 @@ class TategakiTextUtil:
     @staticmethod
     def calc_bound_box_center_location(bound_box):
         """bound_boxの中心座標を求める"""
+        bound_box.update()
         count = len(bound_box)
         temp = [0, 0, 0]
         for x, y, z in bound_box:
+            logger.debug(f"{x,y,z}")
             temp[0] += x
             temp[1] += y
             temp[2] += z
-        return [v / count for v in temp]
+        result = [v / count for v in temp]
+        logger.debug(f"center:{result}")
+        return result
 
     @staticmethod
     def calc_punctuation_offset(bound_box_center: list):
@@ -74,50 +92,89 @@ class TategakiTextUtil:
         offset = [v * -2 for v in bound_box_center]
         return offset
 
-    def create_text_container(self, props=None, name: str = "tatetext", count: int = 1):
-        """テキストコンテナを作る"""
-        bpy.ops.object.text_add(align="CURSOR", scale=(1, 1, 1))
-        text_container: bpy.types.Object = bpy.context.active_object
-        text_container.name = name
-        props = self.init_props()
+    @staticmethod
+    def textformat_to_prop(textfromat: bpy.types.TextCharacterFormat):
+        """フォーマットからプロパティを取り出す"""
+        prop = dict(
+            material_index=textfromat.material_index,
+            use_bold=textfromat.use_bold,
+            use_italic=textfromat.use_italic,
+            use_small_caps=textfromat.use_small_caps,
+        )
+        return prop
 
-        text_container.id_data["tategaki"] = props
+    @staticmethod
+    def prop_to_format(format_props, textformat: bpy.types.TextCharacterFormat):
+        textformat.use_bold = format_props["use_bold"]
+        textformat.use_italic = format_props["use_italic"]
+        textformat.use_small_caps = format_props["use_small_caps"]
+        textformat.material_index = format_props["material_index"]
+        pass
 
-        used = self.apply()
-        for ob in used:
-            ob.parent = text_container
+    def text_slice(self, text_object: bpy.types.Object):
+        data: bpy.types.TextCurve = text_object.data
+        body = data.body
+        body_format = data.body_format
+        lines = body.splitlines()
+        index = 0
+        lines_format = []
+        for line in lines:
+            line_len = len(line)
+            index2 = index + line_len
+            line_format = body_format[index:index2]
+            temp = [self.textformat_to_prop(v) for v in line_format]
+            lines_format.append(temp)
+            index += line_len + 1
+        return lines, lines_format
 
-        bpy.context.view_layer.objects.active = text_container
-        text_container.select_set(True)
-        return text_container
+    """オブジェクト操作"""
 
     def apply_font_settings(
         self,
         text_object: bpy.types.Object,
         grid_addres: list[int, int],
         character: str,
+        format_props,
         props=None,
     ):
         """テキストオブジェクトに設定を反映する"""
         data: bpy.types.TextCurve = text_object.data
         if props is None:
             props = self.props
+        # マテリアル割当
+        for mat in props["original"].data.materials:
+            text_object.data.materials.append(mat)
+        # 文字割当
         data.body = character
-        data.font = bpy.data.fonts[props["font_name"]]
+        # フォント設定
+        # data.font = bpy.data.fonts[props["font_name"]]
+        data.font = props["original"].data.font
+        data.font_bold = props["original"].data.font_bold
+        data.font_italic = props["original"].data.font_italic
+        data.font_bold_italic = props["original"].data.font_bold_italic
+
+        # 解像度設定
         data.resolution_u = props["resolution"]
+        # フォーマット設定
+        self.prop_to_format(format_props, data.body_format[0])
         mx, my = props["margin"]
         gx, gy = grid_addres
         rotation = (0, 0, 0)
         location = self.calc_grid_location(mx, my, gx, gy)
         str_type = self.decision_special_character(character)
         if str_type == "upper_right":
+            logger.debug(character)
             bound_box = text_object.bound_box
             center = self.calc_bound_box_center_location(bound_box)
             offset = self.calc_punctuation_offset(center)
+            logger.debug(f"offset:{offset},location{location}")
             location = mathutils.Vector(location) + mathutils.Vector(offset)
+            logger.debug(f"modified location:{location}")
         elif str_type == "rotation":
             rotation = (0, 0, 0 - pi / 2)
+            # 回転設定
             text_object.rotation_euler = rotation
+        # 座標設定
         text_object.location = location
 
     def add_object_pool(self, count):
@@ -135,14 +192,44 @@ class TategakiTextUtil:
         text_objects = self.pool
         used = []
         used_append = used.append
-        for line_number, line in enumerate(body):
-            for c_number, character in enumerate(line):
+        for line_number, z in enumerate(zip(body, props["lines_format"])):
+            # line, line_format = z
+            logger.debug(list(z))
+            for c_number, character_and_fromat in enumerate(zip(z[0], z[1])):
+                logger.debug(list(character_and_fromat))
+                character, body_format = character_and_fromat
                 text_object = text_objects.pop()
+                logger.debug(body_format)
                 self.apply_font_settings(
-                    text_object, [line_number, c_number], character, props
+                    text_object, [line_number, c_number], character, body_format, props
                 )
                 used_append(text_object)
         return used
+
+    def convert_text_object(self, text_object: bpy.types.Object):
+        """テキストオブジェクトから縦書きテキストに変換する"""
+        props = self.init_props()
+        data: bpy.types.TextCurve = text_object.data
+        body, format_props = self.text_slice(text_object)
+        logger.debug(body)
+        logger.debug(format_props)
+        props["body"] = body
+        props["lines_format"] = format_props
+        props["font_name"] = data.font.name
+        props["original"] = text_object
+        print(props["lines_format"])
+        self.set_props(props)
+        used = self.apply()
+        text_object.id_data["tategaki"] = props
+        for child in used:
+            logger.debug(child)
+            child.parent = text_object
+
+        bpy.ops.outliner.orphans_purge(
+            do_local_ids=True, do_linked_ids=True, do_recursive=False
+        )
+
+    """プロパティ操作"""
 
     def init_props(self):
         tag: str = random_name(8)
@@ -170,6 +257,9 @@ class TategakiTextUtil:
         """チェックしてから反映する"""
         self.props = props.copy()
 
+    def text_to_props(self, text_object):
+        pass
+
 
 class TATEGAKI_OT_AddText(bpy.types.Operator):
     """縦書きテキストオブジェクトを追加"""
@@ -185,9 +275,11 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
     def execute(self, context):
         # infoにメッセージを通知
         t_util = TategakiTextUtil()
-        text_container = t_util.create_text_container()
+        # text_container = t_util.create_text_container()
+        text_object = context.active_object
+        t_util.convert_text_object(text_object)
 
-        self.report({"INFO"}, f"execute {self.bl_idname},obj name is{text_container}")
+        self.report({"INFO"}, f"execute {self.bl_idname}")
         # 正常終了ステータスを返す
         return {"FINISHED"}
 
