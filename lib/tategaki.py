@@ -74,17 +74,20 @@ class TategakiTextUtil:
     @staticmethod
     def calc_bound_box_center_location(bound_box):
         """bound_boxの中心座標を求める"""
-        bound_box.update()
         count = len(bound_box)
-        temp = [0, 0, 0]
-        for x, y, z in bound_box:
-            logger.debug(f"{x,y,z}")
-            temp[0] += x
-            temp[1] += y
-            temp[2] += z
-        result = [v / count for v in temp]
-        logger.debug(f"center:{result}")
-        return result
+        center_xyz = [sum(v) / count for v in zip(*bound_box)]
+        return mathutils.Vector(center_xyz)
+
+    @staticmethod
+    def calc_bound_box_width(bound_box):
+        width_xyz = [max(v) - min(v) for v in zip(*bound_box)]
+        return mathutils.Vector(width_xyz)
+
+    @staticmethod
+    def calc_bound_box_height(bound_box):
+        xyz = [list(v) for v in zip(*bound_box)]
+        max_min = (max(xyz[1]), min([1]))
+        return max_min
 
     @staticmethod
     def calc_punctuation_offset(bound_box_center: list):
@@ -109,7 +112,6 @@ class TategakiTextUtil:
         textformat.use_italic = format_props["use_italic"]
         textformat.use_small_caps = format_props["use_small_caps"]
         textformat.material_index = format_props["material_index"]
-        pass
 
     def text_slice(self, text_object: bpy.types.Object):
         data: bpy.types.TextCurve = text_object.data
@@ -126,6 +128,12 @@ class TategakiTextUtil:
             lines_format.append(temp)
             index += line_len + 1
         return lines, lines_format
+
+    @staticmethod
+    def get_empty():
+        bpy.ops.object.empty_add(align="CURSOR")
+        empty = bpy.context.active_object
+        return empty
 
     """オブジェクト操作"""
 
@@ -147,7 +155,6 @@ class TategakiTextUtil:
         # 文字割当
         data.body = character
         # フォント設定
-        # data.font = bpy.data.fonts[props["font_name"]]
         data.font = props["original"].data.font
         data.font_bold = props["original"].data.font_bold
         data.font_italic = props["original"].data.font_italic
@@ -210,42 +217,45 @@ class TategakiTextUtil:
 
     def convert_text_object(self, text_object: bpy.types.Object):
         """テキストオブジェクトから縦書きテキストに変換する"""
-        props = self.init_props()
-        data: bpy.types.TextCurve = text_object.data
+        container = self.get_empty()
+        container.name = f"{text_object.name}.tategaki"
+        props = self.init_props(container=container, original=text_object)
         body, format_props = self.text_slice(text_object)
         logger.debug(body)
         logger.debug(format_props)
         props["body"] = body
         props["lines_format"] = format_props
-        props["font_name"] = data.font.name
-        props["original"] = text_object
-        print(props["lines_format"])
         self.set_props(props)
         used = self.apply()
-        text_object.id_data["tategaki"] = props
         for child in used:
-            logger.debug(child)
-            child.parent = text_object
+            child.parent = container
 
         bpy.ops.outliner.orphans_purge(
             do_local_ids=True, do_linked_ids=True, do_recursive=False
         )
+        return container
 
     """プロパティ操作"""
 
-    def init_props(self):
+    def init_props(
+        self, container: bpy.types.Object = None, original: bpy.types.Object = None
+    ):
         tag: str = random_name(8)
         margin = [1.0, 1.0]
         resolution: int = 12
         scale = [1.0, 1.0, 1.0]
-        font_name: str = bpy.data.fonts[0].name
         body = ["<012345>", "abcd"]
+        if original is not None:
+            data: bpy.types.TextCurve = original.data
+            body = data.body.splitlines()
+
         props = dict(
+            container=container,
+            original=original,
             tag=tag,
             margin=margin,
             resolution=resolution,
             scale=scale,
-            font_name=font_name,
             body=body,
         )
         self.props = props
@@ -258,9 +268,21 @@ class TategakiTextUtil:
     def set_props(self, props: dict):
         """チェックしてから反映する"""
         self.props = props.copy()
+        self.props["container"].id_data["tategaki"] = props.copy()
 
-    def text_to_props(self, text_object):
-        pass
+
+class TATEGAKI_OT_RemoveChildren(bpy.types.Operator):
+    bl_idname = "tategaki.remove_children"
+    bl_label = "remove children"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        children = context.active_object.children
+        logger.debug(children)
+        _context = bpy.context.copy()
+        _context["selected_objects"] = list(children)
+        bpy.ops.object.delete(context)
+        return {"FINISHED"}
 
 
 class TATEGAKI_OT_AddText(bpy.types.Operator):
@@ -277,10 +299,15 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
     def execute(self, context):
         # infoにメッセージを通知
         t_util = TategakiTextUtil()
-        # text_container = t_util.create_text_container()
         text_object = context.active_object
-        t_util.convert_text_object(text_object)
+        container = t_util.convert_text_object(text_object)
 
+        for obj in context.selected_objects:
+            obj: bpy.types.Object
+            obj.select_set(False)
+
+        container.select_set(True)
+        context.view_layer.objects.active = container
         self.report({"INFO"}, f"execute {self.bl_idname}")
         # 正常終了ステータスを返す
         return {"FINISHED"}
