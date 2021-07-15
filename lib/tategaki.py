@@ -5,6 +5,7 @@ from .util import random_name
 import mathutils
 from math import pi
 import os
+import pprint
 
 
 logger = getLogger(__name__)
@@ -86,7 +87,7 @@ class TategakiTextUtil:
     @staticmethod
     def calc_bound_box_height(bound_box):
         xyz = [list(v) for v in zip(*bound_box)]
-        max_min = (max(xyz[1]), min([1]))
+        max_min = (max(xyz[1]), min(xyz[1]))
         return max_min
 
     @staticmethod
@@ -192,27 +193,73 @@ class TategakiTextUtil:
             objects = self.create_text_objects(self.props["tag"], count)
             self.pool.extend(objects)
 
+    def get_pool_object(self):
+        if not len(self.pool) == 0:
+            return self.pool.pop()
+        else:
+            self.add_object_pool(10)
+
+    def apply_lines(self, props, line, line_format, line_number):
+        """行単位での文字設定などをする"""
+        if props is None:
+            props = self.props
+        container_name = props["container"].name
+        used = []
+        used_append = used.append
+        line_container = self.get_empty()
+        mx, my = props["margin"]
+        line_container.location = self.calc_grid_location(mx, my, line_number, 0)
+        line_container.parent = props["container"]
+        line_container.empty_display_size = 0.5
+        for c_number, character_and_fromat in enumerate(zip(line, line_format)):
+            logger.debug(list(character_and_fromat))
+            character, body_format = character_and_fromat
+            text_object = self.get_pool_object()
+            logger.debug(body_format)
+            self.apply_font_settings(
+                text_object, [0, c_number], character, body_format, props
+            )
+            name = f"{container_name}.{line_number}.{c_number}.{character}"
+            text_object.name = name
+            text_object.parent = line_container
+            used_append(text_object)
+
+        bpy.context.view_layer.update()
+        auto_kerning = False
+        if auto_kerning is True:
+            forward_object = None
+            for text_object in used:
+                if forward_object is None:
+                    forward_object: bpy.types.Object = text_object
+                    continue
+                forward_object_bound_box_height = self.calc_bound_box_height(
+                    forward_object.bound_box
+                )
+                forward_bound_bottom = forward_object_bound_box_height[1]
+                forward_location_y = forward_object.location[1]
+                global_forward_bound_bottom = forward_bound_bottom + forward_location_y
+                local_current_bound_top = self.calc_bound_box_height(
+                    text_object.bound_box
+                )[0]
+                current_location_y = (
+                    local_current_bound_top + global_forward_bound_bottom
+                )
+                text_object.location[1] = current_location_y
+                forward_object = text_object
+
+        return used
+
     def apply(self, props=None):
         if props is None:
             props = self.props
         body = props["body"]
         count = sum(len(c) for c in body)
         self.add_object_pool(count)
-        text_objects = self.pool
         used = []
-        used_append = used.append
         for line_number, z in enumerate(zip(body, props["lines_format"])):
-            # line, line_format = z
-            logger.debug(list(z))
-            for c_number, character_and_fromat in enumerate(zip(z[0], z[1])):
-                logger.debug(list(character_and_fromat))
-                character, body_format = character_and_fromat
-                text_object = text_objects.pop()
-                logger.debug(body_format)
-                self.apply_font_settings(
-                    text_object, [line_number, c_number], character, body_format, props
-                )
-                used_append(text_object)
+            line, line_format = z
+            _used = self.apply_lines(props, line, line_format, line_number)
+            used.extend(_used)
         return used
 
     def convert_text_object(self, text_object: bpy.types.Object):
@@ -227,8 +274,6 @@ class TategakiTextUtil:
         props["lines_format"] = format_props
         self.set_props(props)
         used = self.apply()
-        for child in used:
-            child.parent = container
 
         bpy.ops.outliner.orphans_purge(
             do_local_ids=True, do_linked_ids=True, do_recursive=False
@@ -269,6 +314,20 @@ class TategakiTextUtil:
         """チェックしてから反映する"""
         self.props = props.copy()
         self.props["container"].id_data["tategaki"] = props.copy()
+
+    def load_object_props(self, obj: bpy.types.Object):
+        props = obj["tategaki"].to_dict()
+        self.set_props(props)
+        pass
+
+    def export_props(self, props):
+        if props is None:
+            props = self.props
+        export = bpy.data.texts.new("export")
+        text = pprint.pformat(
+            self.props,
+        )
+        export.write(text)
 
 
 class TATEGAKI_OT_RemoveChildren(bpy.types.Operator):
