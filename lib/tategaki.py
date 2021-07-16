@@ -37,6 +37,8 @@ class TategakiTextUtil:
             return "upper_right"
         elif single_str in "[]()<>＜＞「」｛｝{}-ー―=＝~〜…":
             return "rotation"
+        elif single_str in " 　":
+            return "blank"
         else:
             return "normal"
 
@@ -225,27 +227,66 @@ class TategakiTextUtil:
             used_append(text_object)
 
         bpy.context.view_layer.update()
-        auto_kerning = False
+        auto_kerning = True
+        X, Y = 0, 1
+        MAX, MIN = 0, 1
+
         if auto_kerning is True:
             forward_object = None
             for text_object in used:
                 if forward_object is None:
                     forward_object: bpy.types.Object = text_object
                     continue
-                forward_object_bound_box_height = self.calc_bound_box_height(
-                    forward_object.bound_box
+                current_str_type = self.decision_special_character(
+                    text_object.data.body
                 )
-                forward_bound_bottom = forward_object_bound_box_height[1]
-                forward_location_y = forward_object.location[1]
+                forward_str_type = self.decision_special_character(
+                    forward_object.data.body
+                )
+
+                if forward_str_type == "rotation":
+                    # 回転してる文字列の高さ計算をx軸でやる
+                    xyz = [list(v) for v in zip(*forward_object.bound_box)]
+                    forward_object_bound_box_height = (max(xyz[X]), min(xyz[X]))
+                    # もしかして
+                    forward_bound_bottom = forward_object_bound_box_height[MIN]
+
+                else:
+                    forward_object_bound_box_height = self.calc_bound_box_height(
+                        forward_object.bound_box
+                    )
+                    # 前のオブジェクトのバウンドボックスの底面座標（ローカル）
+                    forward_bound_bottom = forward_object_bound_box_height[MIN]
+                # 前のオブジェクトのy座標（グローバル）
+                forward_location_y = forward_object.location[Y]
+                # 前のオブジェクトのバウンドボックスの底面座標（グローバル）
                 global_forward_bound_bottom = forward_bound_bottom + forward_location_y
-                local_current_bound_top = self.calc_bound_box_height(
-                    text_object.bound_box
-                )[0]
+                # 今のオブジェクトのバウンドボックス上面（ローカル）
+                if current_str_type == "rotation":
+                    xyz = [list(v) for v in zip(*text_object.bound_box)]
+                    local_current_bound_top = max(xyz[X])
+                elif current_str_type == "blank":
+                    local_current_bound_top = props["blank_size"]
+                else:
+                    local_current_bound_top = self.calc_bound_box_height(
+                        text_object.bound_box
+                    )[MAX]
+                # 今のオブジェクトのy座標（グローバル） マージンも反映する
                 current_location_y = (
-                    local_current_bound_top + global_forward_bound_bottom
+                    global_forward_bound_bottom - local_current_bound_top - my
                 )
                 text_object.location[1] = current_location_y
                 forward_object = text_object
+                # log = f"\n \
+                #     forward_location_y{forward_location_y},\n\
+                #     forward_object_bound_box_height={forward_object_bound_box_height},\n\
+                #     forward_bound_bottom={forward_bound_bottom},\n\
+                #     global_forward_bound_bottom={global_forward_bound_bottom},\n\
+                #     local_current_bound_top={local_current_bound_top},\n\
+                #     current_location_y={current_location_y},\n\
+                # "
+                # logger.debug(log)
+                # bpy.context.view_layer.update()
 
         return used
 
@@ -286,10 +327,11 @@ class TategakiTextUtil:
         self, container: bpy.types.Object = None, original: bpy.types.Object = None
     ):
         tag: str = random_name(8)
-        margin = [1.0, 1.0]
+        margin = [1.0, 0]
         resolution: int = 12
         scale = [1.0, 1.0, 1.0]
         body = ["<012345>", "abcd"]
+        blank_size = 0.5
         if original is not None:
             data: bpy.types.TextCurve = original.data
             body = data.body.splitlines()
@@ -302,6 +344,7 @@ class TategakiTextUtil:
             resolution=resolution,
             scale=scale,
             body=body,
+            blank_size=blank_size,
         )
         self.props = props
         self.pool = []
@@ -333,7 +376,7 @@ class TategakiTextUtil:
 class TATEGAKI_OT_RemoveChildren(bpy.types.Operator):
     bl_idname = "tategaki.remove_children"
     bl_label = "remove children"
-    bl_options = {"REGISTER", "UNDO"}
+    bl_options = {"REGISTER", "UNDO", "MACRO"}
 
     def execute(self, context):
         children = context.active_object.children
