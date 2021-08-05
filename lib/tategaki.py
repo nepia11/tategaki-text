@@ -36,7 +36,7 @@ class TategakiTextUtil:
         """文字のタイプを判定して返す"""
         if single_str in "、。,.":
             return "upper_right"
-        elif single_str in "[]()<>＜＞「」｛｝{}-ー―=＝~〜…":
+        elif single_str in "[]()（）<>＜＞「」｛｝{}-ー―=＝~〜…":
             return "rotation"
         elif single_str in " 　":
             return "blank"
