@@ -3,6 +3,7 @@ import bpy
 from logging import getLogger
 from .util import random_name
 import mathutils
+import math
 from math import pi
 import os
 import pprint
@@ -193,6 +194,8 @@ class TategakiTextUtil:
         pool_len = len(self.pool)
         if pool_len < count:
             objects = self.create_text_objects(self.props["tag"], count)
+            for obj in objects:
+                obj.parent = self.props["container"]
             self.pool.extend(objects)
 
     def get_pool_object(self):
@@ -200,6 +203,86 @@ class TategakiTextUtil:
             return self.pool.pop()
         else:
             self.add_object_pool(10)
+
+    def apply_auto_kerning(self, text_line: list, margin=0.0):
+        """縦書き文字のカーニングをする"""
+        MAX, MIN = 0, 1
+        forward_object = None
+        forward_props = {
+            "bound_box_height": [0, 0],
+            "bound_bottom": 0,
+            "global_bound_bottom": 0,
+            "location_y": 0,
+        }
+
+        for i, text_object in enumerate(text_line):
+            text_object: bpy.types.Object
+            current_str_type = self.decision_special_character(text_object.data.body)
+
+            if current_str_type == "rotation":
+
+                def override_context(name):
+                    _context = bpy.context.copy()
+                    obj = bpy.data.objects[name]
+                    _context["active_object"] = obj
+                    _context["selected_objects"] = [obj]
+                    _context["view_layer"].objects.active = obj
+                    return _context
+
+                # 何故かcontext overrideが効かない
+                bpy.ops.object.select_all(action="DESELECT")
+                text_object.select_set(True)
+                bpy.context.view_layer.objects.active = text_object
+                bpy.ops.object.convert(
+                    # override_context(text_object.name),
+                    target="MESH",
+                    keep_original=True,
+                )
+                _converted_object = bpy.context.active_object
+                _temp_name = _converted_object.name
+                bpy.ops.object.transform_apply(
+                    override_context(_converted_object.name),
+                    location=False,
+                    rotation=True,
+                )
+
+                local_current_bound_box_height = self.calc_bound_box_height(
+                    bpy.data.objects[_temp_name].bound_box
+                )
+                local_current_bound_top = local_current_bound_box_height[MAX]
+
+                bpy.data.objects.remove(bpy.data.objects[_temp_name])
+
+            elif current_str_type == "blank":
+                local_current_bound_box_height = self.calc_bound_box_height(
+                    text_object.bound_box
+                )
+                local_current_bound_top = self.props["blank_size"]
+            else:
+                local_current_bound_box_height = self.calc_bound_box_height(
+                    text_object.bound_box
+                )
+                local_current_bound_top = local_current_bound_box_height[MAX]
+            # 今のオブジェクトのy座標（グローバル） マージンも反映する
+            if i == 0:
+                current_location_y = (
+                    forward_props["global_bound_bottom"] - local_current_bound_top
+                )
+            else:
+                current_location_y = (
+                    forward_props["global_bound_bottom"]
+                    - local_current_bound_top
+                    - margin
+                )
+            text_object.location[1] = current_location_y
+            forward_object = text_object
+            current_bound_bottom = local_current_bound_box_height[MIN]
+            forward_props = {
+                "bound_box_height": local_current_bound_box_height,
+                "bound_bottom": current_bound_bottom,
+                "global_bound_bottom": current_bound_bottom + current_location_y,
+                "location_y": current_location_y,
+            }
 
     def apply_lines(self, props, line, line_format, line_number):
         """行単位での文字設定などをする"""
@@ -228,66 +311,9 @@ class TategakiTextUtil:
 
         bpy.context.view_layer.update()
         auto_kerning = True
-        X, Y = 0, 1
-        MAX, MIN = 0, 1
 
         if auto_kerning is True:
-            forward_object = None
-            for text_object in used:
-                if forward_object is None:
-                    forward_object: bpy.types.Object = text_object
-                    continue
-                current_str_type = self.decision_special_character(
-                    text_object.data.body
-                )
-                forward_str_type = self.decision_special_character(
-                    forward_object.data.body
-                )
-
-                if forward_str_type == "rotation":
-                    # 回転してる文字列の高さ計算をx軸でやる
-                    xyz = [list(v) for v in zip(*forward_object.bound_box)]
-                    forward_object_bound_box_height = (max(xyz[X]), min(xyz[X]))
-                    # もしかして
-                    forward_bound_bottom = forward_object_bound_box_height[MIN]
-
-                else:
-                    forward_object_bound_box_height = self.calc_bound_box_height(
-                        forward_object.bound_box
-                    )
-                    # 前のオブジェクトのバウンドボックスの底面座標（ローカル）
-                    forward_bound_bottom = forward_object_bound_box_height[MIN]
-                # 前のオブジェクトのy座標（グローバル）
-                forward_location_y = forward_object.location[Y]
-                # 前のオブジェクトのバウンドボックスの底面座標（グローバル）
-                global_forward_bound_bottom = forward_bound_bottom + forward_location_y
-                # 今のオブジェクトのバウンドボックス上面（ローカル）
-                if current_str_type == "rotation":
-                    xyz = [list(v) for v in zip(*text_object.bound_box)]
-                    local_current_bound_top = max(xyz[X])
-                elif current_str_type == "blank":
-                    local_current_bound_top = props["blank_size"]
-                else:
-                    local_current_bound_top = self.calc_bound_box_height(
-                        text_object.bound_box
-                    )[MAX]
-                # 今のオブジェクトのy座標（グローバル） マージンも反映する
-                current_location_y = (
-                    global_forward_bound_bottom - local_current_bound_top - my
-                )
-                text_object.location[1] = current_location_y
-                forward_object = text_object
-                # log = f"\n \
-                #     forward_location_y{forward_location_y},\n\
-                #     forward_object_bound_box_height={forward_object_bound_box_height},\n\
-                #     forward_bound_bottom={forward_bound_bottom},\n\
-                #     global_forward_bound_bottom={global_forward_bound_bottom},\n\
-                #     local_current_bound_top={local_current_bound_top},\n\
-                #     current_location_y={current_location_y},\n\
-                # "
-                # logger.debug(log)
-                # bpy.context.view_layer.update()
-
+            self.apply_auto_kerning(text_line=used, margin=my)
         return used
 
     def apply(self, props=None):
@@ -313,6 +339,7 @@ class TategakiTextUtil:
         logger.debug(format_props)
         props["body"] = body
         props["lines_format"] = format_props
+        props["margin"] = [1, 0.1]
         self.set_props(props)
         used = self.apply()
 
@@ -404,9 +431,7 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
         text_object = context.active_object
         container = t_util.convert_text_object(text_object)
 
-        for obj in context.selected_objects:
-            obj: bpy.types.Object
-            obj.select_set(False)
+        bpy.ops.object.select_all(action="DESELECT")
 
         container.select_set(True)
         context.view_layer.objects.active = container
