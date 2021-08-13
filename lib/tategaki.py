@@ -1,7 +1,7 @@
 # コピペする用　__init__への登録は解除しといたほうが良い
 import bpy
 from logging import getLogger
-from .util import random_name
+from .util import random_name, timer
 import mathutils
 import math
 from math import pi
@@ -50,6 +50,7 @@ class TategakiTextUtil:
         return inserted
 
     @staticmethod
+    @timer
     def create_text_objects(name: str, count: int = 1):
         """任意個のテキストオブジェクトを名前をつけて生成、テキストオブジェクトのリストを返す"""
         objects = []
@@ -176,13 +177,13 @@ class TategakiTextUtil:
         if str_type == "upper_right":
             # bound_boxの更新が遅延するためupdateする
             bpy.context.view_layer.update()
-            logger.debug(character)
+            # logger.debug(character)
             bound_box = text_object.bound_box
             center = self.calc_bound_box_center_location(bound_box)
             offset = self.calc_punctuation_offset(center)
-            logger.debug(f"offset:{offset},location{location}")
+            # logger.debug(f"offset:{offset},location{location}")
             location = mathutils.Vector(location) + mathutils.Vector(offset)
-            logger.debug(f"modified location:{location}")
+            # logger.debug(f"modified location:{location}")
         elif str_type == "rotation":
             rotation = (0, 0, 0 - pi / 2)
             # 回転設定
@@ -297,10 +298,10 @@ class TategakiTextUtil:
         line_container.parent = props["container"]
         line_container.empty_display_size = 0.5
         for c_number, character_and_fromat in enumerate(zip(line, line_format)):
-            logger.debug(list(character_and_fromat))
+            # logger.debug(list(character_and_fromat))
             character, body_format = character_and_fromat
             text_object = self.get_pool_object()
-            logger.debug(body_format)
+            # logger.debug(body_format)
             self.apply_font_settings(
                 text_object, [0, c_number], character, body_format, props
             )
@@ -335,8 +336,8 @@ class TategakiTextUtil:
         container.name = f"{text_object.name}.tategaki"
         props = self.init_props(container=container, original=text_object)
         body, format_props = self.text_slice(text_object)
-        logger.debug(body)
-        logger.debug(format_props)
+        # logger.debug(body)
+        # logger.debug(format_props)
         props["body"] = body
         props["lines_format"] = format_props
         props["margin"] = [1, 0.1]

@@ -2,6 +2,7 @@ import random
 import string
 import bpy
 import mathutils
+from time import time
 from logging import getLogger
 
 
@@ -50,3 +51,15 @@ def gp_licker(gp_data: bpy.types.GreasePencil, func, state={}):
             func(state["layers"][li]["frames"][fi], frame, "frame")
             for si, stroke in enumerate(frame.strokes):
                 func(state["layers"][li]["frames"][fi]["strokes"][si], stroke, "stroke")
+
+
+def timer(func):
+    def wrapper(*args, **kwargs):
+        start_time = time()
+        result = func(*args, **kwargs)
+        finish_time = time()
+        time_spend = finish_time - start_time
+        logger.debug(f"{func.__name__} time: {time_spend*1000}ms")
+        return result
+
+    return wrapper
