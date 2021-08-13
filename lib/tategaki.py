@@ -1,7 +1,7 @@
 # コピペする用　__init__への登録は解除しといたほうが良い
 import bpy
 from logging import getLogger
-from .util import random_name, timer
+from .util import random_name, timer, mesh_transform_apply
 import mathutils
 import math
 from math import pi
@@ -53,19 +53,21 @@ class TategakiTextUtil:
     @timer
     def create_text_objects(name: str, count: int = 1):
         """任意個のテキストオブジェクトを名前をつけて生成、テキストオブジェクトのリストを返す"""
-        objects = []
-        append = objects.append
-        for i in range(count):
-            bpy.ops.object.text_add(location=(0, 0, 0))
-            obj = bpy.context.active_object
-            obj.name = f"{name}.{i}"
-            data: bpy.types.TextCurve = obj.data
-            # 初期値を入れておく
+        collection = bpy.data.collections.get("tategaki_pool")
+        if collection is None:
+            collection = bpy.data.collections.new("tategaki_pool")
+
+        data_list = [bpy.data.curves.new(f"{name}.{i}", "FONT") for i in range(count)]
+        objects = [bpy.data.objects.new(data.name, data) for data in data_list]
+
+        for obj in objects:
+            data = obj.data
             data.body = ""
-            # 中央寄せにする
-            data.align_x = "CENTER"
             data.align_y = "CENTER"
-            append(obj)
+            data.align_x = "CENTER"
+            collection.objects.link(obj)
+
+        bpy.context.scene.collection.children.link(collection)
         return objects
 
     @staticmethod
@@ -135,9 +137,15 @@ class TategakiTextUtil:
         return lines, lines_format
 
     @staticmethod
+    @timer
     def get_empty():
-        bpy.ops.object.empty_add(align="CURSOR")
-        empty = bpy.context.active_object
+        collection = bpy.data.collections.get("tategaki_pool")
+        if collection is None:
+            collection = bpy.data.collections.new("tategaki_pool")
+        empty = bpy.data.objects.new("empty", None)
+        collection.objects.link(empty)
+        # bpy.ops.object.empty_add(align="CURSOR")
+        # empty = bpy.context.active_object
         return empty
 
     """オブジェクト操作"""
@@ -205,6 +213,7 @@ class TategakiTextUtil:
         else:
             self.add_object_pool(10)
 
+    @timer
     def apply_auto_kerning(self, text_line: list, margin=0.0):
         """縦書き文字のカーニングをする"""
         MAX, MIN = 0, 1
@@ -330,9 +339,11 @@ class TategakiTextUtil:
             used.extend(_used)
         return used
 
+    @timer
     def convert_text_object(self, text_object: bpy.types.Object):
         """テキストオブジェクトから縦書きテキストに変換する"""
         container = self.get_empty()
+        container.location = bpy.context.scene.cursor.location
         container.name = f"{text_object.name}.tategaki"
         props = self.init_props(container=container, original=text_object)
         body, format_props = self.text_slice(text_object)
