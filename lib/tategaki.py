@@ -1,9 +1,10 @@
 # コピペする用　__init__への登録は解除しといたほうが良い
 import bpy
 from logging import getLogger
-from .util import random_name, timer, mesh_transform_apply
+from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
 import mathutils
-import math
+
+# import math
 from math import pi
 import os
 import pprint
@@ -67,7 +68,9 @@ class TategakiTextUtil:
             data.align_x = "CENTER"
             collection.objects.link(obj)
 
-        bpy.context.scene.collection.children.link(collection)
+        if bpy.context.scene.collection.children.get(collection.name) is None:
+            bpy.context.scene.collection.children.link(collection)
+
         return objects
 
     @staticmethod
@@ -231,30 +234,23 @@ class TategakiTextUtil:
 
             if current_str_type == "rotation":
 
-                def override_context(name):
-                    _context = bpy.context.copy()
-                    obj = bpy.data.objects[name]
-                    _context["active_object"] = obj
-                    _context["selected_objects"] = [obj]
-                    _context["view_layer"].objects.active = obj
-                    return _context
+                _selected = list(bpy.context.view_layer.objects.selected)
+                for _obj in _selected:
+                    _obj.select_set(False)
 
-                # 何故かcontext overrideが効かない
-                bpy.ops.object.select_all(action="DESELECT")
                 text_object.select_set(True)
                 bpy.context.view_layer.objects.active = text_object
-                bpy.ops.object.convert(
-                    # override_context(text_object.name),
-                    target="MESH",
-                    keep_original=True,
-                )
-                _converted_object = bpy.context.active_object
+
+                # text curveからメッシュへ変換してコピー
+                _converted_object = convert_to_mesh(text_object)
+
                 _temp_name = _converted_object.name
-                bpy.ops.object.transform_apply(
-                    override_context(_converted_object.name),
-                    location=False,
-                    rotation=True,
+                bpy.context.view_layer.update()
+
+                mesh_transform_apply(
+                    _converted_object, location=False, rotation=True, world=False
                 )
+                bpy.context.view_layer.update()
 
                 local_current_bound_box_height = self.calc_bound_box_height(
                     bpy.data.objects[_temp_name].bound_box
@@ -294,6 +290,7 @@ class TategakiTextUtil:
                 "location_y": current_location_y,
             }
 
+    @timer
     def apply_lines(self, props, line, line_format, line_number):
         """行単位での文字設定などをする"""
         if props is None:
@@ -301,7 +298,17 @@ class TategakiTextUtil:
         container_name = props["container"].name
         used = []
         used_append = used.append
-        line_container = self.get_empty()
+        # line_containersがなかったら追加する
+        line_containers: list = self.props.get("line_containers")
+        if line_containers is None:
+            line_containers = {}
+            self.props["line_containers"] = line_containers
+        # line_containersに在庫があったらそれを使う
+        line_container = line_containers.get(str(line_number))
+        # 在庫がなかったら生成してに追加する
+        if line_container is None:
+            line_container = self.get_empty()
+            line_containers[str(line_number)] = line_container
         mx, my = props["margin"]
         line_container.location = self.calc_grid_location(mx, my, line_number, 0)
         line_container.parent = props["container"]
@@ -358,6 +365,7 @@ class TategakiTextUtil:
         bpy.ops.outliner.orphans_purge(
             do_local_ids=True, do_linked_ids=True, do_recursive=False
         )
+        self.set_props(self.props)
         return container
 
     """プロパティ操作"""
@@ -431,10 +439,17 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
 
     bl_idname = "tategaki.add_text"
     bl_label = translation("my operator")
-    bl_description = "縦書きテキストオブジェクトを追加"
+    bl_description = "アクティブなテキストオブジェクトから縦書きテキストオブジェクトを生成"
     bl_options = {"REGISTER", "UNDO"}
 
     text: bpy.props.StringProperty(name="text test", default="「あいうえお。」")
+
+    @classmethod
+    def poll(cls, context):
+        if context.active_object.type == "FONT":
+            return True
+        else:
+            return False
 
     # メニューを実行したときに呼ばれるメソッド
     def execute(self, context):

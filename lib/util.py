@@ -63,3 +63,62 @@ def timer(func):
         return result
 
     return wrapper
+
+
+def mesh_transform_apply(
+    obj: bpy.types.Object, location=True, rotation=True, scale=True, world=True
+):
+    """メッシュオブジェクトのトランスフォームを適応する"""
+    # mw = obj.matrix_world
+    if world is True:
+        matrix = obj.matrix_world
+    else:
+        matrix = obj.matrix_local
+    matrix = mathutils.Matrix(matrix)
+    loc, rot, sca = matrix.decompose()
+    # create a location matrix
+    if location:
+        mat_loc = mathutils.Matrix.Translation(loc)
+    else:
+        mat_loc = mathutils.Matrix.Translation((0.0, 0.0, 0.0))
+
+    if scale:
+        mat_sca = (
+            mathutils.Matrix.Scale(sca[0], 4, (1, 0, 0))
+            @ mathutils.Matrix.Scale(sca[1], 4, (0, 1, 0))
+            @ mathutils.Matrix.Scale(sca[2], 4, (0, 0, 1))
+        )
+    else:
+        mat_sca = mathutils.Matrix.Scale(1, 4)
+
+    # create a rotation matrix
+    if rotation:
+        mat_rot = rot.to_matrix()
+        mat_rot = mat_rot.to_4x4()
+    else:
+        mat_rot = mathutils.Matrix.Rotation(0, 4, "X")
+
+    # combine transformations
+    mat_out = mat_loc @ mat_rot @ mat_sca
+
+    msh = obj.data
+    for v in msh.vertices:
+        v.co = mat_out @ v.co
+
+    obj.location = [0, 0, 0]
+    obj.rotation_euler = mathutils.Euler()
+    obj.scale = [1, 1, 1]
+
+
+def convert_to_mesh(obj: bpy.types.Object) -> bpy.types.Object:
+    """
+    変換可能なオブジェクトをメッシュオブジェクトに変換する
+    :return converted_object
+    """
+    mesh = obj.to_mesh().copy()
+    _converted_object = bpy.data.objects.new(mesh.name, mesh)
+    bpy.context.scene.collection.objects.link(_converted_object)
+    _converted_object.location = obj.location
+    _converted_object.rotation_euler = obj.rotation_euler
+    _converted_object.scale = obj.scale
+    return _converted_object

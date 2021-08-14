@@ -1,25 +1,33 @@
 import importlib
 from logging import getLogger, StreamHandler, Formatter, handlers, DEBUG
 import sys
-import bpy
 import os
 import datetime
-from .lib import get_module_names
+
+# import bpy
 
 
 # アドオン情報
 bl_info = {
     "name": "tategaki text",
     "author": "nepia",
-    "version": (0, 1, 0),
-    "blender": (2, 83, 0),
-    "location": "addon (operator,panel,ui) location",
-    "description": "addon description",
+    "version": (0, 2, 0),
+    "blender": (2, 93, 0),
+    "location": "view3d>追加>縦書きテキスト",
+    "description": "",
     "warning": "",
     "wiki_url": "",
     "tracker_url": "",
     "category": "",
 }
+
+module_names = [
+    # "ops_template",
+    # "ops_capture_color",
+    # "ui_template",
+    "tategaki",
+    "translations",
+]
 
 
 def setup_logger(log_folder: str, modname=__name__):
@@ -52,7 +60,6 @@ logger.debug("hello")
 
 
 # サブモジュールのインポート
-module_names = get_module_names()
 namespace = {}
 for name in module_names:
     fullname = "{}.{}.{}".format(__package__, "lib", name)
@@ -64,35 +71,20 @@ for name in module_names:
 logger.debug(namespace)
 
 
-def register_icons():
-    icons = [
-        "TEST",
-    ]
-    bpy.types.Scene.scatter_gpencil = bpy.utils.previews.new()
-    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-    for icon in icons:
-        bpy.types.Scene.scatter_gpencil.load(
-            icon, os.path.join(icons_dir, icon + ".png"), "IMAGE"
-        )
-
-
-def unregister_icons():
-    bpy.utils.previews.remove(bpy.types.Scene.scatter_gpencil)
-
-
 def register():
     for module in namespace.values():
         module.register()
-    # register_icons()
     _name = bl_info["name"]
     _version = bl_info["version"]
-    logger.debug(f"succeeded register {_name}:version{_version}")
+    logger.debug(f"registered {_name}:version{_version}")
 
 
 def unregister():
     for module in namespace.values():
         module.unregister()
-    # unregister_icons()
+    _name = bl_info["name"]
+    _version = bl_info["version"]
+    logger.debug(f"unregistered {_name}:version{_version}")
 
 
 if __name__ == "__main__":
