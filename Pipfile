@@ -4,11 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+"fake-bpy-module-2.93" = "*"
+mypy = "*"
 
 [dev-packages]
 flake8 = "*"
 black = "*"
-"fake-bpy-module-2.93" = "*"
 
 [requires]
 python_version = "3.9"
+
+[pipenv]
+allow_prereleases = true

@@ -7,12 +7,12 @@ import zipfile
 
 # リリース用のzipを作るスクリプト
 
-file_list = (
+file_list = [
     "LICENSE",
     "README.md",
     "__init__.py",
     "lib",
-)
+]
 
 ignores = shutil.ignore_patterns("__pycache__", "*.pyc")
 
@@ -24,7 +24,7 @@ def random_name(n: int) -> str:
     return "".join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
-def make_zip(org_name: str, file_list: tuple, suffix: str):
+def make_zip(org_name: str, file_list: list[str], suffix: str):
     zip_name: str = org_name + "_" + suffix
     zip_dir = "./" + zip_name
     zip_path = "./" + zip_name + ".zip"
@@ -40,7 +40,7 @@ def make_zip(org_name: str, file_list: tuple, suffix: str):
 
     zp = zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED)
 
-    for dirname, subdirs, filenames in os.walk(zip_dir):
+    for dirname, _subdirs, filenames in os.walk(zip_dir):
         for filename in filenames:
             zp.write(os.path.join(dirname, filename))
 
@@ -48,7 +48,7 @@ def make_zip(org_name: str, file_list: tuple, suffix: str):
     shutil.rmtree(zip_dir)
 
 
-def main(args):
+def main(args: list[str]):
     arg_len = len(args)
     org_name: str = "dst"
     suffix: str = ""
