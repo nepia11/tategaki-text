@@ -1,18 +1,22 @@
-# コピペする用　__init__への登録は解除しといたほうが良い
 import bpy
 from logging import getLogger
+
+from bpy.types import TextBox
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
 import mathutils
-
-# import math
 from math import pi
 import os
 import pprint
-
+from typing import TypedDict, Final
 
 logger = getLogger(__name__)
 
 translation = bpy.app.translations.pgettext
+
+# types
+TATEGAKI: Final[str] = "tategaki"
+TATEGAKI_CHR: Final[str] = "tategaki_chr"
+Objects = list[bpy.types.Object]
 
 
 def load_fonts():
@@ -20,11 +24,35 @@ def load_fonts():
     fonts_dir = os.path.join(path, "fonts")
     fonts_name = os.listdir(fonts_dir)
     for name in fonts_name:
-        if not bpy.data.fonts.find("name") == -1:
+        if name in bpy.data.fonts.keys():
             continue
         _path = os.path.join(fonts_dir, name)
         bpy.ops.font.open(relative_path=False, filepath=_path)
         bpy.data.fonts[name].use_fake_user = True
+
+
+class TategakiState(TypedDict):
+    """
+    縦書きテキストの状態を保存するやつ
+    """
+
+    container: bpy.types.Object
+    original: bpy.types.Object
+    tag: str
+    resolution: int
+    body: list[str]
+    lines_format: list
+    line_spacing: float
+    chr_spacing: float
+    blank_size: float
+    pool: Objects
+    line_containers: dict[str, bpy.types.Object]
+    auto_kerning: bool
+    materials: list[bpy.types.Material]
+    font: bpy.types.VectorFont
+    font_bold: bpy.types.VectorFont
+    font_italic: bpy.types.VectorFont
+    font_bold_italic: bpy.types.VectorFont
 
 
 class TategakiTextUtil:
@@ -46,7 +74,7 @@ class TategakiTextUtil:
 
     @staticmethod
     def insertion_newline_code(strings: str):
-        """文字列に改行コードを挿入"""
+        """文字列に改行コードを挿入 使わん"""
         inserted = [moji + "\n" for moji in strings]
         return inserted
 
@@ -59,10 +87,10 @@ class TategakiTextUtil:
             collection = bpy.data.collections.new("tategaki_pool")
 
         data_list = [bpy.data.curves.new(f"{name}.{i}", "FONT") for i in range(count)]
-        objects = [bpy.data.objects.new(data.name, data) for data in data_list]
+        objects: Objects = [bpy.data.objects.new(data.name, data) for data in data_list]
 
         for obj in objects:
-            data = obj.data
+            data: bpy.types.TextCurve = obj.data
             data.body = ""
             data.align_y = "CENTER"
             data.align_x = "CENTER"
@@ -74,10 +102,12 @@ class TategakiTextUtil:
         return objects
 
     @staticmethod
-    def calc_grid_location(margin_x: float, margin_y: float, grid_x: int, grid_y: int):
+    def calc_grid_location(
+        line_spacing: float, chr_spacing: float, grid_x: int, grid_y: int
+    ):
         """マージンとグリッドの番地から座標を求める"""
-        x = 0 - margin_x * grid_x
-        y = 0 - margin_y * grid_y
+        x = 0 - line_spacing * grid_x
+        y = 0 - chr_spacing * grid_y
         location = [x, y, 0.0]
         return location
 
@@ -147,8 +177,6 @@ class TategakiTextUtil:
             collection = bpy.data.collections.new("tategaki_pool")
         empty = bpy.data.objects.new("empty", None)
         collection.objects.link(empty)
-        # bpy.ops.object.empty_add(align="CURSOR")
-        # empty = bpy.context.active_object
         return empty
 
     """オブジェクト操作"""
@@ -156,33 +184,33 @@ class TategakiTextUtil:
     def apply_font_settings(
         self,
         text_object: bpy.types.Object,
-        grid_addres: list[int, int],
+        grid_addres: list[int],
         character: str,
         format_props,
-        props=None,
+        state: TategakiState = None,
     ):
         """テキストオブジェクトに設定を反映する"""
         data: bpy.types.TextCurve = text_object.data
-        if props is None:
-            props = self.props
+        if state is None:
+            state = self.state
         # マテリアル割当
-        for mat in props["original"].data.materials:
+        for mat in state["materials"]:
             text_object.data.materials.append(mat)
         # 文字割当
         data.body = character
         # フォント設定
-        data.font = props["original"].data.font
-        data.font_bold = props["original"].data.font_bold
-        data.font_italic = props["original"].data.font_italic
-        data.font_bold_italic = props["original"].data.font_bold_italic
+        data.font = state["font"]
+        data.font_bold = state["font_bold"]
+        data.font_italic = state["font_italic"]
+        data.font_bold_italic = state["font_bold_italic"]
 
         # 解像度設定
-        data.resolution_u = props["resolution"]
+        data.resolution_u = state["resolution"]
         # フォーマット設定
         self.prop_to_format(format_props, data.body_format[0])
-        mx, my = props["margin"]
+        mx, my = state["line_spacing"], state["chr_spacing"]
         gx, gy = grid_addres
-        rotation = (0, 0, 0)
+        rotation = (0.0, 0.0, 0.0)
         location = self.calc_grid_location(mx, my, gx, gy)
         str_type = self.decision_special_character(character)
         if str_type == "upper_right":
@@ -196,30 +224,48 @@ class TategakiTextUtil:
             location = mathutils.Vector(location) + mathutils.Vector(offset)
             # logger.debug(f"modified location:{location}")
         elif str_type == "rotation":
-            rotation = (0, 0, 0 - pi / 2)
+            rotation = (0.0, 0.0, 0.0 - pi / 2)
             # 回転設定
             text_object.rotation_euler = rotation
         # 座標設定
         text_object.location = location
 
     def add_object_pool(self, count):
-        pool_len = len(self.pool)
+        pool_len = len(self.state["pool"])
         if pool_len < count:
-            objects = self.create_text_objects(self.props["tag"], count)
+            objects = self.create_text_objects(self.state["tag"], count)
             for obj in objects:
-                obj.parent = self.props["container"]
-            self.pool.extend(objects)
+                obj.parent = self.state["container"]
+            self.state["pool"].extend(objects)
 
     def get_pool_object(self):
-        if not len(self.pool) == 0:
-            return self.pool.pop()
+        if not len(self.state["pool"]) == 0:
+            return self.state["pool"].pop()
         else:
             self.add_object_pool(10)
 
+    def apply_constant_kerning(self, text_line: Objects):
+        chr_spacing = self.state["chr_spacing"]
+        for chr_num, text_object in enumerate(text_line):
+            data: bpy.types.TextCurve = text_object.data
+            character = data.body
+            location = self.calc_grid_location(0, chr_spacing, 0, chr_num)
+            str_type = self.decision_special_character(character)
+            if str_type == "upper_right":
+                # bound_boxの更新が遅延するためupdateする
+                bpy.context.view_layer.update()
+                bound_box = text_object.bound_box
+                center = self.calc_bound_box_center_location(bound_box)
+                offset = self.calc_punctuation_offset(center)
+                location = mathutils.Vector(location) + mathutils.Vector(offset)
+            # 座標設定
+            text_object.location = location
+
     @timer
-    def apply_auto_kerning(self, text_line: list, margin=0.0):
+    def apply_auto_kerning(self, text_line: Objects):
         """縦書き文字のカーニングをする"""
         MAX, MIN = 0, 1
+        margin = self.state["chr_spacing"]
         forward_object = None
         forward_props = {
             "bound_box_height": [0, 0],
@@ -229,7 +275,7 @@ class TategakiTextUtil:
         }
 
         for i, text_object in enumerate(text_line):
-            text_object: bpy.types.Object
+            # text_object: bpy.types.Object
             current_str_type = self.decision_special_character(text_object.data.body)
 
             if current_str_type == "rotation":
@@ -263,7 +309,7 @@ class TategakiTextUtil:
                 local_current_bound_box_height = self.calc_bound_box_height(
                     text_object.bound_box
                 )
-                local_current_bound_top = self.props["blank_size"]
+                local_current_bound_top = self.state["blank_size"]
             else:
                 local_current_bound_box_height = self.calc_bound_box_height(
                     text_object.bound_box
@@ -291,35 +337,31 @@ class TategakiTextUtil:
             }
 
     @timer
-    def apply_lines(self, props, line, line_format, line_number):
+    def apply_lines(self, state: TategakiState, line, line_format, line_number: int):
         """行単位での文字設定などをする"""
-        if props is None:
-            props = self.props
-        container_name = props["container"].name
-        used = []
+        if state is None:
+            state = self.state
+        container_name = state["container"].name
+        used: Objects = []
         used_append = used.append
-        # line_containersがなかったら追加する
-        line_containers: list = self.props.get("line_containers")
-        if line_containers is None:
-            line_containers = {}
-            self.props["line_containers"] = line_containers
+        line_containers = self.state["line_containers"]
         # line_containersに在庫があったらそれを使う
         line_container = line_containers.get(str(line_number))
         # 在庫がなかったら生成してに追加する
         if line_container is None:
             line_container = self.get_empty()
             line_containers[str(line_number)] = line_container
-        mx, my = props["margin"]
+        mx, my = state["line_spacing"], state["chr_spacing"]
         line_container.location = self.calc_grid_location(mx, my, line_number, 0)
-        line_container.parent = props["container"]
+        line_container.parent = state["container"]
         line_container.empty_display_size = 0.5
+        line_container.hide_viewport = True
         for c_number, character_and_fromat in enumerate(zip(line, line_format)):
-            # logger.debug(list(character_and_fromat))
             character, body_format = character_and_fromat
             text_object = self.get_pool_object()
             # logger.debug(body_format)
             self.apply_font_settings(
-                text_object, [0, c_number], character, body_format, props
+                text_object, [0, c_number], character, body_format, state
             )
             name = f"{container_name}.{line_number}.{c_number}.{character}"
             text_object.name = name
@@ -327,22 +369,43 @@ class TategakiTextUtil:
             used_append(text_object)
 
         bpy.context.view_layer.update()
-        auto_kerning = True
 
-        if auto_kerning is True:
-            self.apply_auto_kerning(text_line=used, margin=my)
+        if state["auto_kerning"] is True:
+            self.apply_auto_kerning(text_line=used)
         return used
 
-    def apply(self, props=None):
-        if props is None:
-            props = self.props
-        body = props["body"]
+    def update_lines_spacing(self):
+        line_spacing = self.state["line_spacing"]
+        lines = self.state["line_containers"]
+        for key, obj in lines.items():
+            line_number = key
+            loc = self.calc_grid_location(0, line_spacing, 0, line_number)
+            obj.location = loc
+
+    def update_chr_spacing(self):
+        auto_kerning = self.state["auto_kerning"]
+        chr_spacing = self.state["chr_spacing"]
+        line_containers = self.state["line_containers"]
+        lci = line_containers.items()
+        if auto_kerning:
+            for _num, line_container in lci:
+                text_line = list(line_container.children)
+                self.apply_auto_kerning(text_line)
+        else:
+            for _num, line_container in lci:
+                text_line = list(line_container.children)
+                self.apply_constant_kerning(text_line)
+
+    def apply(self, state=None):
+        if state is None:
+            state = self.state
+        body = state["body"]
         count = sum(len(c) for c in body)
         self.add_object_pool(count)
         used = []
-        for line_number, z in enumerate(zip(body, props["lines_format"])):
+        for line_number, z in enumerate(zip(body, state["lines_format"])):
             line, line_format = z
-            _used = self.apply_lines(props, line, line_format, line_number)
+            _used = self.apply_lines(state, line, line_format, line_number)
             used.extend(_used)
         return used
 
@@ -352,72 +415,99 @@ class TategakiTextUtil:
         container = self.get_empty()
         container.location = bpy.context.scene.cursor.location
         container.name = f"{text_object.name}.tategaki"
-        props = self.init_props(container=container, original=text_object)
+        state = self.init_state(container=container, original=text_object)
         body, format_props = self.text_slice(text_object)
-        # logger.debug(body)
-        # logger.debug(format_props)
-        props["body"] = body
-        props["lines_format"] = format_props
-        props["margin"] = [1, 0.1]
-        self.set_props(props)
+        state["body"] = body
+        state["lines_format"] = format_props
+        state["auto_kerning"] = True
+        self.set_state(state)
         used = self.apply()
-
         bpy.ops.outliner.orphans_purge(
             do_local_ids=True, do_linked_ids=True, do_recursive=False
         )
-        self.set_props(self.props)
+        self.save_state()
         return container
 
     """プロパティ操作"""
 
-    def init_props(
+    def init_state(
         self, container: bpy.types.Object = None, original: bpy.types.Object = None
     ):
-        tag: str = random_name(8)
-        margin = [1.0, 0]
-        resolution: int = 12
-        scale = [1.0, 1.0, 1.0]
         body = ["<012345>", "abcd"]
-        blank_size = 0.5
         if original is not None:
             data: bpy.types.TextCurve = original.data
             body = data.body.splitlines()
 
-        props = dict(
+        font = data.font
+        font_bold = data.font_bold
+        font_italic = data.font_italic
+        font_bold_italic = data.font_bold_italic
+
+        materials = list(data.materials)
+
+        state = TategakiState(
             container=container,
             original=original,
-            tag=tag,
-            margin=margin,
-            resolution=resolution,
-            scale=scale,
+            tag=random_name(8),
+            resolution=12,
             body=body,
-            blank_size=blank_size,
+            lines_format=[],
+            line_spacing=1.0,
+            chr_spacing=0.1,
+            blank_size=0.5,
+            pool=[],
+            line_containers=dict(),
+            auto_kerning=False,
+            materials=materials,
+            font=font,
+            font_bold=font_bold,
+            font_italic=font_italic,
+            font_bold_italic=font_bold_italic,
         )
-        self.props = props
-        self.pool = []
-        return props
 
-    def get_props(self):
-        return self.props.copy()
+        self.state = state
+        return state
 
-    def set_props(self, props: dict):
-        """チェックしてから反映する"""
-        self.props = props.copy()
-        self.props["container"].id_data["tategaki"] = props.copy()
+    def get_state(self):
+        return self.state.copy()
 
-    def load_object_props(self, obj: bpy.types.Object):
-        props = obj["tategaki"].to_dict()
-        self.set_props(props)
-        pass
+    def set_state(self, state: TategakiState):
+        self.state = TategakiState(**state)
 
-    def export_props(self, props):
-        if props is None:
-            props = self.props
+    def save_state(self):
+        """オブジェクトにstateを保存する"""
+        state_dict = self.state.copy()
+        container = self.state["container"]
+        if TATEGAKI in container.keys():
+            container[TATEGAKI].update(state_dict)
+        else:
+            container[TATEGAKI] = state_dict
+
+    def load_object_state(self, obj: bpy.types.Object):
+        state = obj[TATEGAKI].to_dict()
+        self.set_state(state)
+        return self.state
+
+    def export_state(self, state):
+        if state is None:
+            state = self.state
         export = bpy.data.texts.new("export")
         text = pprint.pformat(
-            self.props,
+            self.state,
         )
         export.write(text)
+
+    def update(self):
+        state = self.state
+        body = state["body"]
+        # count = sum(len(c) for c in body)
+        # self.add_object_pool(count)
+        used = []
+        for line_number, z in enumerate(zip(body, state["lines_format"])):
+            line, line_format = z
+            _used = self.apply_lines(state, line, line_format, line_number)
+            used.extend(_used)
+        return used
 
 
 class TATEGAKI_OT_RemoveChildren(bpy.types.Operator):
@@ -438,11 +528,9 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
     """縦書きテキストオブジェクトを追加"""
 
     bl_idname = "tategaki.add_text"
-    bl_label = translation("my operator")
+    bl_label = "add tategaki text"
     bl_description = "アクティブなテキストオブジェクトから縦書きテキストオブジェクトを生成"
     bl_options = {"REGISTER", "UNDO"}
-
-    text: bpy.props.StringProperty(name="text test", default="「あいうえお。」")
 
     @classmethod
     def poll(cls, context):
@@ -453,18 +541,79 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
 
     # メニューを実行したときに呼ばれるメソッド
     def execute(self, context):
-        # infoにメッセージを通知
         t_util = TategakiTextUtil()
         text_object = context.active_object
         container = t_util.convert_text_object(text_object)
-
         bpy.ops.object.select_all(action="DESELECT")
-
         container.select_set(True)
         context.view_layer.objects.active = container
+        # infoにメッセージを通知
         self.report({"INFO"}, f"execute {self.bl_idname}")
         # 正常終了ステータスを返す
         return {"FINISHED"}
+
+
+class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
+    """縦書きテキストオブジェクトを更新する"""
+
+    bl_idname = "tategaki.update_object"
+    bl_label = "update tategaki object"
+    bl_description = ""
+    bl_options = {"REGISTER", "UNDO"}
+
+    auto_kerning: bpy.props.BoolProperty(
+        name="auto kerning",
+        description="自動的に文字詰めをする",
+        default=False,
+    )
+
+    chr_spacing: bpy.props.FloatProperty(
+        name="character spacing",
+        description="文字間隔",
+        default=0.5,
+    )
+    line_spacing: bpy.props.FloatProperty(
+        name="line spacing",
+        description="行間隔",
+        default=1,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.active_object.keys():
+            return True
+        else:
+            return False
+
+    is_running = False
+
+    def modal(self, context, event):
+        # エリアを再描画
+        if context.area:
+            context.area.tag_redraw()
+        if event.type == "TIMER":
+            try:
+                pass
+            except (KeyError):
+                # モーダルモードを終了
+                logger.debug("key error")
+                return {"CANCELLED"}
+
+        return {"PASS_THROUGH"}
+
+    def invoke(self, context, event):
+
+        if context.area.type == "VIEW_3D":
+            if not self.is_running:
+                # モーダルモードを開始
+                self.is_running = True
+                return {"RUNNING_MODAL"}
+            else:
+                # モーダルモードを終了
+                self.__handle_remove(context)
+                return {"FINISHED"}
+        else:
+            return {"FINISHED"}
 
 
 def tategaki_menu(self, context):
@@ -473,34 +622,39 @@ def tategaki_menu(self, context):
 
 class TATEGAKI_PT_Panel(bpy.types.Panel):
 
-    bl_label = "My panel"
+    bl_label = "Tategaki Tool"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "TATEGAKI"
+    bl_category = "Item"
+
+    line_spacing = bpy.props.FloatProperty()
 
     # 本クラスの処理が実行可能かを判定する
     @classmethod
     def poll(cls, context):
         try:
             # うまく行かない
-            # if context.active_object["tategaki"]:
+            # if context.active_object[TATEGAKI]:
             return True
         except AttributeError:
             return False
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="object name")
+        layout.label(text="object name", icon="DOT")
         layout.label(text=context.active_object.name)
-        mx, my = context.active_object["tategaki"]["margin"]
-        layout.label(text=f"{mx},{my}")
+        state: TategakiState = context.active_object[TATEGAKI]
+        line_spacing, chr_spacing = state["line_spacing"], state["chr_spacing"]
+        layout.label(text=f"line_spacing:  {line_spacing}")
+        layout.label(text=f"chr_spacing:  {chr_spacing}")
+        update_object = layout.operator("tategaki.update_object")
+        layout.prop(update_object, "auto_kerning")
+        layout.prop(update_object, "chr_spacing")
+        layout.prop(update_object, "line_spacing")
 
-        props = layout.operator("tategaki.my_operator")
-        layout.prop(props, "text")
 
-
-classses = [TATEGAKI_OT_AddText, TATEGAKI_PT_Panel]
-tools = []
+classses = [TATEGAKI_OT_AddText, TATEGAKI_PT_Panel, TATEGAKI_OT_UpdateObject]
+tools: list = []
 
 
 def register():
@@ -510,6 +664,12 @@ def register():
         bpy.utils.register_tool(t)
 
     bpy.types.VIEW3D_MT_add.append(tategaki_menu)
+    bpy.types.Scene.tategaki_margin = bpy.props.FloatVectorProperty(
+        name="margin x y blank",
+        size=3,
+        default=(1.0, 0.1, 0.5),
+        subtype="LAYER",
+    )
 
 
 def unregister():
@@ -519,3 +679,4 @@ def unregister():
         bpy.utils.unregister_tool(t)
 
     bpy.types.VIEW3D_MT_add.remove(tategaki_menu)
+    del bpy.types.Scene.tategaki_margin

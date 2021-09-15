@@ -6,10 +6,10 @@ name = "pypi"
 [packages]
 "fake-bpy-module-2.93" = "*"
 mypy = "*"
-
-[dev-packages]
 flake8 = "*"
 black = "*"
+
+[dev-packages]
 
 [requires]
 python_version = "3.9"
