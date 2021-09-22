@@ -1,3 +1,4 @@
+import collections
 import bpy
 from logging import getLogger
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
@@ -40,6 +41,7 @@ class TategakiState(TypedDict):
 
     container: bpy.types.Object
     original: bpy.types.Object
+    name: str
     tag: str
     resolution: int
     body: list[str]
@@ -94,12 +96,17 @@ class TategakiTextUtil:
         return inserted
 
     @staticmethod
-    @timer
-    def create_text_objects(name: str, count: int = 1):
-        """任意個のテキストオブジェクトを名前をつけて生成、テキストオブジェクトのリストを返す"""
-        collection = bpy.data.collections.get("tategaki_pool")
+    def get_collection(name: str):
+        """collectionを取得（生成）"""
+        collection = bpy.data.collections.get(name)
         if collection is None:
-            collection = bpy.data.collections.new("tategaki_pool")
+            collection = bpy.data.collections.new(name)
+        return collection
+
+    @timer
+    def create_text_objects(self, name: str, count: int = 1):
+        """任意個のテキストオブジェクトを名前をつけて生成、テキストオブジェクトのリストを返す"""
+        collection = self.get_collection(self.state["name"])
 
         data_list = [bpy.data.curves.new(f"{name}.{i}", "FONT") for i in range(count)]
         objects: Objects = [bpy.data.objects.new(data.name, data) for data in data_list]
@@ -186,10 +193,10 @@ class TategakiTextUtil:
 
     @staticmethod
     @timer
-    def get_empty():
-        collection = bpy.data.collections.get("tategaki_pool")
+    def get_empty(collection_name: str = "tategaki_pool"):
+        collection = bpy.data.collections.get(collection_name)
         if collection is None:
-            collection = bpy.data.collections.new("tategaki_pool")
+            collection = bpy.data.collections.new(collection_name)
         empty = bpy.data.objects.new("empty", None)
         collection.objects.link(empty)
         return empty
@@ -317,14 +324,6 @@ class TategakiTextUtil:
             current_str_type = self.decision_special_character(text_object.data.body)
 
             if current_str_type == "rotation":
-
-                # _selected = list(bpy.context.view_layer.objects.selected)
-                # for _obj in _selected:
-                #     _obj.select_set(False)
-
-                # text_object.select_set(True)
-                # bpy.context.view_layer.objects.active = text_object
-
                 # text curveからメッシュへ変換してコピー
                 _converted_object = convert_to_mesh(text_object)
 
@@ -387,7 +386,7 @@ class TategakiTextUtil:
         line_container = line_containers.get(str(line_number))
         # 在庫がなかったら生成してに追加する
         if line_container is None:
-            line_container = self.get_empty()
+            line_container = self.get_empty(self.state["name"])
             line_containers[str(line_number)] = line_container
         mx, my = state["line_spacing"], state["chr_spacing"]
         line_container.location = self.calc_grid_location(mx, my, line_number, 0)
@@ -428,14 +427,17 @@ class TategakiTextUtil:
     @timer
     def convert_text_object(self, text_object: bpy.types.Object):
         """テキストオブジェクトから縦書きテキストに変換する"""
-        container = self.get_empty()
+        collection_name = f"{text_object.name}.tategaki"
+        self.get_collection(collection_name)
+        container = self.get_empty(collection_name=collection_name)
         container.location = bpy.context.scene.cursor.location
-        container.name = f"{text_object.name}.tategaki"
+        container.name = collection_name
         state = self.init_state(container=container, original=text_object)
         body, format_props = self.text_slice(text_object)
         state["body"] = body
         state["lines_format"] = format_props
         state["auto_kerning"] = True
+        state["name"] = collection_name
         self.set_state(state)
         used = self.apply()
         bpy.ops.outliner.orphans_purge(
@@ -464,6 +466,7 @@ class TategakiTextUtil:
         state = TategakiState(
             container=container,
             original=original,
+            name=random_name(8),
             tag=random_name(8),
             resolution=12,
             body=body,
@@ -514,18 +517,6 @@ class TategakiTextUtil:
         )
         export.write(text)
 
-    def update(self):
-        state = self.state
-        body = state["body"]
-        # count = sum(len(c) for c in body)
-        # self.add_object_pool(count)
-        used = []
-        for line_number, z in enumerate(zip(body, state["lines_format"])):
-            line, line_format = z
-            _used = self.apply_lines(state, line, line_format, line_number)
-            used.extend(_used)
-        return used
-
     def update_lines_spacing(self):
         """stateに合わせて行間を更新する"""
         line_spacing = self.state["line_spacing"]
@@ -570,19 +561,22 @@ class TategakiTextUtil:
             kerning_hints.append(line_hints)
         state["lines_kerning_hint"] = kerning_hints
 
-
-class TATEGAKI_OT_RemoveChildren(bpy.types.Operator):
-    bl_idname = "tategaki.remove_children"
-    bl_label = "remove children"
-    bl_options = {"REGISTER", "UNDO", "MACRO"}
-
-    def execute(self, context):
-        children = context.active_object.children
-        logger.debug(children)
-        _context = bpy.context.copy()
-        _context["selected_objects"] = list(children)
-        bpy.ops.object.delete(context)
-        return {"FINISHED"}
+    def to_mesh(self, context):
+        """縦書きテキストをメッシュに変換する"""
+        line_containers = self.state["line_containers"]
+        lci = line_containers.items()
+        objects = []
+        for _num, line_container in lci:
+            text_line = list(line_container.children)
+            objects.extend(text_line)
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = objects[0]
+        bpy.ops.object.convert(target="MESH", keep_original=True)
+        mesh_objects = bpy.context.selected_objects
+        bpy.ops.object.join()
+        return bpy.context.active_object
 
 
 class TATEGAKI_OT_AddText(bpy.types.Operator):
@@ -665,6 +659,46 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
             return {"CANCELED"}
 
 
+class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
+    """縦書きテキストオブジェクトをメッシュまたはカーブに変換する"""
+
+    bl_idname = "tategaki.freeze"
+    bl_label = "freeze tategaki object"
+    bl_description = "縦書きテキストオブジェクトをメッシュまたはカーブに変換する"
+    bl_options = {"REGISTER", "UNDO"}
+
+    keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.active_object.keys():
+            return True
+        else:
+            return False
+
+    def execute(self, context: bpy.types.Context):
+        active_object: bpy.types.Object = context.active_object
+        if TATEGAKI in active_object.keys():
+            t_util = TategakiTextUtil()
+            t_util.load_object_state(active_object)
+            location = active_object.location
+            if self.keep_original is False:
+                obj = t_util.to_mesh(context)
+                obj.name = t_util.state["name"] + ".freeze"
+                collection = t_util.get_collection(t_util.state["name"])
+                obj.parent = None
+                collection.objects.unlink(obj)
+                context.scene.collection.objects.link(obj)
+                obj.location = location
+                return {"FINISHED"}
+            else:
+                pass
+        else:
+            # pollで弾くので普通は表示されない
+            self.report({"ERROR"}, f"active object is not tategaki-text-container")
+            return {"CANCELED"}
+
+
 def tategaki_menu(self, context):
     self.layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキスト", icon="PLUGIN")
 
@@ -697,12 +731,18 @@ class TATEGAKI_PT_Panel(bpy.types.Panel):
         layout.label(text=f"line_spacing:  {line_spacing}")
         layout.label(text=f"chr_spacing:  {chr_spacing}")
         update_object = layout.operator("tategaki.update_object")
+        layout.operator("tategaki.freeze")
         # layout.prop(update_object, "auto_kerning")
         # layout.prop(update_object, "chr_spacing")
         # layout.prop(update_object, "line_spacing")
 
 
-classses = [TATEGAKI_OT_AddText, TATEGAKI_PT_Panel, TATEGAKI_OT_UpdateObject]
+classses = [
+    TATEGAKI_OT_AddText,
+    TATEGAKI_PT_Panel,
+    TATEGAKI_OT_UpdateObject,
+    TATEGAKI_OT_FreezeObject,
+]
 tools: list = []
 
 
