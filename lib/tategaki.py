@@ -201,6 +201,18 @@ class TategakiTextUtil:
         collection.objects.link(empty)
         return empty
 
+    @staticmethod
+    @timer
+    def get_empty_mesh_object(collection_name: str = "tategaki_pool"):
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            collection = bpy.data.collections.new(collection_name)
+        name = random_name(8)
+        mesh = bpy.data.meshes.new(name)
+        obj = bpy.data.objects.new(name, mesh)
+        collection.objects.link(obj)
+        return obj
+
     @timer
     def calc_kerning_hint(self, text_object: bpy.types.Object):
         """カーニング用の情報を計算する"""
@@ -569,14 +581,21 @@ class TategakiTextUtil:
         for _num, line_container in lci:
             text_line = list(line_container.children)
             objects.extend(text_line)
-        bpy.ops.object.select_all(action="DESELECT")
-        for obj in objects:
-            obj.select_set(True)
-        bpy.context.view_layer.objects.active = objects[0]
-        bpy.ops.object.convert(target="MESH", keep_original=True)
-        mesh_objects = bpy.context.selected_objects
-        bpy.ops.object.join()
-        return bpy.context.active_object
+        mesh_objects = [convert_to_mesh(obj) for obj in objects]
+        # 結合するときに都合がいいので空のメッシュオブジェクトを作る
+        empty_mesh_object = self.get_empty_mesh_object(self.state["name"])
+        empty_mesh_object.parent = self.state["container"]
+        joined_object_name = empty_mesh_object.name
+        mesh_objects.append(empty_mesh_object)
+        # オーバーライドコンテキストを作る
+        override = context.copy()
+        override["selected_objects"] = mesh_objects
+        override["selected_editable_objects"] = mesh_objects
+        override["active_object"] = bpy.data.objects[joined_object_name]
+        bpy.ops.object.join(override)
+        location = self.state["container"].location
+        bpy.data.objects[joined_object_name].location = location
+        return bpy.data.objects[joined_object_name]
 
 
 class TATEGAKI_OT_AddText(bpy.types.Operator):
@@ -671,9 +690,12 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if TATEGAKI in context.active_object.keys():
-            return True
-        else:
+        try:
+            if TATEGAKI in context.active_object.keys():
+                return True
+            else:
+                return False
+        except:
             return False
 
     def execute(self, context: bpy.types.Context):

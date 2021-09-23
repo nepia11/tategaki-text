@@ -110,7 +110,7 @@ def mesh_transform_apply(
     obj.scale = [1, 1, 1]
 
 
-def convert_to_mesh(obj: bpy.types.Object) -> bpy.types.Object:
+def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types.Object:
     """
     変換可能なオブジェクトをメッシュオブジェクトに変換する
     :return converted_object
@@ -121,4 +121,6 @@ def convert_to_mesh(obj: bpy.types.Object) -> bpy.types.Object:
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler
     _converted_object.scale = obj.scale
+    if parent_inheritance:
+        _converted_object.parent = obj.parent
     return _converted_object
