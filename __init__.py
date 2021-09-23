@@ -9,22 +9,19 @@ import datetime
 
 # アドオン情報
 bl_info = {
-    "name": "tategaki text",
+    "name": "Tategaki Text Tools",
     "author": "nepia",
-    "version": (0, 2, 0),
+    "version": (1, 0, 0),
     "blender": (2, 93, 0),
-    "location": "view3d>追加>縦書きテキスト",
-    "description": "",
+    "location": "view3d>object_context_menu>Tategaki Tools",
+    "description": "テキストオブジェクトを縦書きに変換、細かな調整をするツール郡です",
     "warning": "",
-    "wiki_url": "",
+    "wiki_url": "https://github.com/nepia11/tategaki-text",
     "tracker_url": "",
-    "category": "",
+    "category": "Object",
 }
 
 module_names = [
-    # "ops_template",
-    # "ops_capture_color",
-    # "ui_template",
     "tategaki",
     "translations",
 ]

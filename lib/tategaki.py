@@ -1,4 +1,5 @@
 import collections
+import bl_ui
 import bpy
 from logging import getLogger
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
@@ -704,14 +705,19 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
             t_util = TategakiTextUtil()
             t_util.load_object_state(active_object)
             location = active_object.location
+            obj = t_util.to_mesh(context)
+            obj.name = t_util.state["name"] + ".freeze"
+            collection = t_util.get_collection(t_util.state["name"])
+            obj.parent = None
+            collection.objects.unlink(obj)
+            context.scene.collection.objects.link(obj)
+            obj.location = location
             if self.keep_original is False:
-                obj = t_util.to_mesh(context)
-                obj.name = t_util.state["name"] + ".freeze"
-                collection = t_util.get_collection(t_util.state["name"])
-                obj.parent = None
-                collection.objects.unlink(obj)
-                context.scene.collection.objects.link(obj)
-                obj.location = location
+                # コレクションの中身と自身を削除
+                all_objects = list(collection.all_objects)
+                for obj in all_objects:
+                    bpy.data.objects.remove(obj)
+                bpy.data.collections.remove(collection)
                 return {"FINISHED"}
             else:
                 pass
@@ -721,18 +727,11 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
             return {"CANCELED"}
 
 
-def tategaki_menu(self, context):
-    self.layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキスト", icon="PLUGIN")
+class TATEGAKI_MT_Tools(bpy.types.Menu):
+    """ツールの一覧メニュー"""
 
-
-class TATEGAKI_PT_Panel(bpy.types.Panel):
-
-    bl_label = "Tategaki Tool"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Item"
-
-    line_spacing = bpy.props.FloatProperty()
+    bl_label = "Tategaki Tools"
+    bl_idname = "tategaki.menu"
 
     # 本クラスの処理が実行可能かを判定する
     @classmethod
@@ -741,27 +740,28 @@ class TATEGAKI_PT_Panel(bpy.types.Panel):
             # うまく行かない
             if TATEGAKI in context.active_object.keys():
                 return True
+            if context.active_object.type == "FONT":
+                return True
+            return False
         except AttributeError:
             return False
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="object name", icon="DOT")
-        layout.label(text=context.active_object.name)
-        state: TategakiState = context.active_object[TATEGAKI]
-        line_spacing, chr_spacing = state["line_spacing"], state["chr_spacing"]
-        layout.label(text=f"line_spacing:  {line_spacing}")
-        layout.label(text=f"chr_spacing:  {chr_spacing}")
-        update_object = layout.operator("tategaki.update_object")
-        layout.operator("tategaki.freeze")
-        # layout.prop(update_object, "auto_kerning")
-        # layout.prop(update_object, "chr_spacing")
-        # layout.prop(update_object, "line_spacing")
+        layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
+        layout.operator(TATEGAKI_OT_UpdateObject.bl_idname, text="行間・字間調整")
+        layout.operator(TATEGAKI_OT_FreezeObject.bl_idname, text="メッシュに変換")
+
+
+def tategaki_menu(self, context):
+    layout: bpy.types.UILayout = self.layout
+    layout.separator()
+    layout.menu(TATEGAKI_MT_Tools.bl_idname, icon="PLUGIN")
 
 
 classses = [
     TATEGAKI_OT_AddText,
-    TATEGAKI_PT_Panel,
+    TATEGAKI_MT_Tools,
     TATEGAKI_OT_UpdateObject,
     TATEGAKI_OT_FreezeObject,
 ]
@@ -774,13 +774,8 @@ def register():
     for t in tools:
         bpy.utils.register_tool(t)
 
-    bpy.types.VIEW3D_MT_add.append(tategaki_menu)
-    bpy.types.Scene.tategaki_margin = bpy.props.FloatVectorProperty(
-        name="margin x y blank",
-        size=3,
-        default=(1.0, 0.1, 0.5),
-        subtype="LAYER",
-    )
+    bpy.types.VIEW3D_MT_object.append(tategaki_menu)
+    bpy.types.VIEW3D_MT_object_context_menu.append(tategaki_menu)
 
 
 def unregister():
@@ -789,5 +784,5 @@ def unregister():
     for t in tools:
         bpy.utils.unregister_tool(t)
 
-    bpy.types.VIEW3D_MT_add.remove(tategaki_menu)
-    del bpy.types.Scene.tategaki_margin
+    bpy.types.VIEW3D_MT_object.remove(tategaki_menu)
+    bpy.types.VIEW3D_MT_object_context_menu.remove(tategaki_menu)

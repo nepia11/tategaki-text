@@ -24,7 +24,7 @@ jobs:
 
       - name: build
         run: |
-          python build.py blender_gpencil_stroke_normalizer release
+          python build.py tategaki_text_tools release
 
       - name: Create release
         id: create_release
@@ -44,6 +44,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./blender_gpencil_stroke_normalizer_release.zip
-          asset_name: blender_gpencil_stroke_normalizer_${{ github.ref }}.zip
+          asset_path: ./tategaki_text_tools_release.zip
+          asset_name: tategaki_text_tools_${{ github.ref }}.zip
           asset_content_type: application/zip
