@@ -1,9 +1,8 @@
-import collections
-import bl_ui
 import bpy
+from bpy.types import TextCurve, Object, VectorFont, TextCharacterFormat
+import mathutils
 from logging import getLogger
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
-import mathutils
 from math import pi
 import os
 import pprint
@@ -19,7 +18,7 @@ translation = bpy.app.translations.pgettext
 # types
 TATEGAKI: Final[str] = "tategaki"
 TATEGAKI_CHR: Final[str] = "tategaki_chr"
-Objects = list[bpy.types.Object]
+Objects = list[Object]
 BoundBoxHeight = namedtuple("BoundBoxHeight", ["max", "min"])
 
 # https://dlrecord.hatenablog.com/entry/2020/07/30/230234
@@ -31,7 +30,7 @@ def natural_keys(text: str):
     return [atoi(c) for c in re.split(r"(\d+)", text)]
 
 
-def object_sort_function(obj: bpy.types.Object):
+def object_sort_function(obj: Object):
     return natural_keys(obj.name)
 
 
@@ -40,8 +39,8 @@ class TategakiState(TypedDict):
     縦書きテキストの状態を保存するやつ
     """
 
-    container: bpy.types.Object
-    original: bpy.types.Object
+    container: Object
+    original: Object
     name: str
     tag: str
     resolution: int
@@ -52,13 +51,13 @@ class TategakiState(TypedDict):
     chr_spacing: float
     blank_size: float
     pool: Objects
-    line_containers: dict[str, bpy.types.Object]
+    line_containers: dict[str, Object]
     auto_kerning: bool
     materials: list[bpy.types.Material]
-    font: bpy.types.VectorFont
-    font_bold: bpy.types.VectorFont
-    font_italic: bpy.types.VectorFont
-    font_bold_italic: bpy.types.VectorFont
+    font: VectorFont
+    font_bold: VectorFont
+    font_italic: VectorFont
+    font_bold_italic: VectorFont
 
 
 def load_fonts():
@@ -97,6 +96,24 @@ class TategakiTextUtil:
         return inserted
 
     @staticmethod
+    def unique_strings(string: str):
+        """文字列の重複を排除する"""
+        return "".join(set(string))
+
+    @staticmethod
+    def get_chr_data(font_name: str, chr: str) -> TextCurve:
+        """font.chr TextCurveを取得"""
+        name = f"{font_name}.{chr}"
+        data = bpy.data.curves.get(name)
+        if data is None:
+            data = bpy.data.curves.new(name, "FONT")
+            data.body = chr
+            data.align_y = "CENTER"
+            data.align_x = "CENTER"
+            data.font = bpy.data.fonts[font_name]
+        return data
+
+    @staticmethod
     def get_collection(name: str):
         """collectionを取得（生成）"""
         collection = bpy.data.collections.get(name)
@@ -113,7 +130,7 @@ class TategakiTextUtil:
         objects: Objects = [bpy.data.objects.new(data.name, data) for data in data_list]
 
         for obj in objects:
-            data: bpy.types.TextCurve = obj.data
+            data: TextCurve = obj.data
             data.body = ""
             data.align_y = "CENTER"
             data.align_x = "CENTER"
@@ -159,7 +176,7 @@ class TategakiTextUtil:
         return offset
 
     @staticmethod
-    def textformat_to_prop(textfromat: bpy.types.TextCharacterFormat):
+    def textformat_to_prop(textfromat: TextCharacterFormat):
         """フォーマットからプロパティを取り出す"""
         prop = dict(
             material_index=textfromat.material_index,
@@ -170,14 +187,14 @@ class TategakiTextUtil:
         return prop
 
     @staticmethod
-    def prop_to_format(format_props, textformat: bpy.types.TextCharacterFormat):
+    def prop_to_format(format_props, textformat: TextCharacterFormat):
         textformat.use_bold = format_props["use_bold"]
         textformat.use_italic = format_props["use_italic"]
         textformat.use_small_caps = format_props["use_small_caps"]
         textformat.material_index = format_props["material_index"]
 
-    def text_slice(self, text_object: bpy.types.Object):
-        data: bpy.types.TextCurve = text_object.data
+    def text_slice(self, text_object: Object):
+        data: TextCurve = text_object.data
         body = data.body
         body_format = data.body_format
         lines = body.splitlines()
@@ -215,7 +232,7 @@ class TategakiTextUtil:
         return obj
 
     @timer
-    def calc_kerning_hint(self, text_object: bpy.types.Object):
+    def calc_kerning_hint(self, text_object: Object):
         """カーニング用の情報を計算する"""
         str_type = self.decision_special_character(text_object.data.body)
         if str_type == "rotation":
@@ -241,14 +258,14 @@ class TategakiTextUtil:
 
     def apply_font_settings(
         self,
-        text_object: bpy.types.Object,
+        text_object: Object,
         grid_addres: list[int],
         character: str,
         format_props,
         state: TategakiState = None,
     ):
         """テキストオブジェクトに設定を反映する"""
-        data: bpy.types.TextCurve = text_object.data
+        data: TextCurve = text_object.data
         if state is None:
             state = self.state
         # マテリアル割当
@@ -305,7 +322,7 @@ class TategakiTextUtil:
     def apply_constant_kerning(self, text_line: Objects):
         chr_spacing = self.state["chr_spacing"]
         for chr_num, text_object in enumerate(text_line):
-            data: bpy.types.TextCurve = text_object.data
+            data: TextCurve = text_object.data
             character = data.body
             location = self.calc_grid_location(0, chr_spacing, 0, chr_num)
             str_type = self.decision_special_character(character)
@@ -333,7 +350,7 @@ class TategakiTextUtil:
         }
 
         for i, text_object in enumerate(text_line):
-            # text_object: bpy.types.Object
+            # text_object: Object
             current_str_type = self.decision_special_character(text_object.data.body)
 
             if current_str_type == "rotation":
@@ -440,7 +457,7 @@ class TategakiTextUtil:
         return used
 
     @timer
-    def convert_text_object(self, text_object: bpy.types.Object):
+    def convert_text_object(self, text_object: Object):
         """テキストオブジェクトから縦書きテキストに変換する"""
         collection_name = f"{text_object.name}.tategaki"
         self.get_collection(collection_name)
@@ -463,12 +480,10 @@ class TategakiTextUtil:
 
     """プロパティ操作"""
 
-    def init_state(
-        self, container: bpy.types.Object = None, original: bpy.types.Object = None
-    ):
+    def init_state(self, container: Object = None, original: Object = None):
         body = ["<012345>", "abcd"]
         if original is not None:
-            data: bpy.types.TextCurve = original.data
+            data: TextCurve = original.data
             body = data.body.splitlines()
 
         font = data.font
@@ -483,7 +498,7 @@ class TategakiTextUtil:
             original=original,
             name=random_name(8),
             tag=random_name(8),
-            resolution=12,
+            resolution=3,
             body=body,
             lines_format=[],
             lines_kerning_hint=[],
@@ -518,7 +533,7 @@ class TategakiTextUtil:
         else:
             container[TATEGAKI] = state_dict
 
-    def load_object_state(self, obj: bpy.types.Object):
+    def load_object_state(self, obj: Object):
         state = obj[TATEGAKI].to_dict()
         self.set_state(state)
         return self.state
@@ -576,18 +591,22 @@ class TategakiTextUtil:
             kerning_hints.append(line_hints)
         state["lines_kerning_hint"] = kerning_hints
 
-    def to_mesh(self, context):
+    def to_mesh(self, context, resolution=3):
         """縦書きテキストをメッシュに変換する"""
         line_containers = self.state["line_containers"]
         lci = line_containers.items()
-        objects = []
+        objects: Objects = []
         for _num, line_container in lci:
-            text_line = list(line_container.children)
+            text_line: Objects = list(line_container.children)
             # childrenがNoneのときがあるので除外する
             if len(text_line) == 0:
                 continue
             else:
                 objects.extend(text_line)
+
+        for obj in objects:
+            data: TextCurve = obj.data
+            data.resolution_u = resolution
 
         logger.debug(pprint.pformat(objects))
         body_len = sum([len(s) for s in self.state["body"]])
@@ -672,7 +691,7 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
             return False
 
     def execute(self, context):
-        active_object: bpy.types.Object = context.active_object
+        active_object: Object = context.active_object
         if TATEGAKI in active_object.keys():
             t_util = TategakiTextUtil()
             state = t_util.load_object_state(active_object)
@@ -700,6 +719,8 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
 
+    resolution: bpy.props.IntProperty(name="resolution", default=3)
+
     @classmethod
     def poll(cls, context):
         try:
@@ -711,12 +732,12 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
             return False
 
     def execute(self, context: bpy.types.Context):
-        active_object: bpy.types.Object = context.active_object
+        active_object: Object = context.active_object
         if TATEGAKI in active_object.keys():
             t_util = TategakiTextUtil()
             t_util.load_object_state(active_object)
             location = active_object.location
-            obj = t_util.to_mesh(context)
+            obj = t_util.to_mesh(context, resolution=self.resolution)
             obj.name = t_util.state["name"] + ".freeze"
             collection = t_util.get_collection(t_util.state["name"])
             obj.parent = None

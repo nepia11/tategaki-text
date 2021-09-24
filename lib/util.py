@@ -115,8 +115,34 @@ def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types
     変換可能なオブジェクトをメッシュオブジェクトに変換する
     :return converted_object
     """
-    mesh = obj.to_mesh().copy()
+    mesh = obj.to_mesh()
+    if mesh is None:
+        mesh = bpy.data.meshes.new("empty_mesh")
+    else:
+        mesh = mesh.copy()
     _converted_object = bpy.data.objects.new(mesh.name, mesh)
+    bpy.context.scene.collection.objects.link(_converted_object)
+    _converted_object.location = obj.location
+    _converted_object.rotation_euler = obj.rotation_euler
+    _converted_object.scale = obj.scale
+    if parent_inheritance:
+        _converted_object.parent = obj.parent
+    return _converted_object
+
+
+def convert_to_curve(
+    obj: bpy.types.Object, parent_inheritance=True
+) -> bpy.types.Object:
+    """
+    変換可能なオブジェクトをカーブオブジェクトに変換する
+    :return converted_object
+    """
+    curve = obj.to_curve(bpy.context.evaluated_depsgraph_get())
+    if curve is None:
+        curve = bpy.data.curves.new("empty_curve", "CURVE")
+    else:
+        curve = curve.copy()
+    _converted_object = bpy.data.objects.new(curve.name, curve)
     bpy.context.scene.collection.objects.link(_converted_object)
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler

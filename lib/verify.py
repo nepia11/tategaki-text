@@ -38,9 +38,29 @@ def test_create_linked_text_object(count: int = 100):
     return objects
 
 
-def unique_strings(strings: str):
+def unique_strings(string: str):
     """
     文字列の重複を排除する
     サンプルテキストで399 -> 110まで重複を減らせたので有用かも
     """
-    return "".join(set(strings))
+    return "".join(set(string))
+
+
+def get_chr_data(font_name: str, chr: str):
+    """フォントの文字を取得"""
+    name = f"{font_name}.{chr}"
+    data = bpy.data.curves.get(name)
+    if data is None:
+        data = bpy.data.curves.new(name, "FONT")
+        data.body = chr
+        data.align_y = "CENTER"
+        data.align_x = "CENTER"
+        data.font = bpy.data.fonts[font_name]
+    return data
+
+
+@timer
+def test_get_chr_data(count=100):
+    """検索は結構速い"""
+    li = [get_chr_data("Bfont", "A") for c in range(count)]
+    pass
