@@ -83,7 +83,7 @@ class TategakiTextUtil:
         """文字のタイプを判定して返す"""
         if single_str in "、。,.":
             return "upper_right"
-        elif single_str in "[]()（）<>＜＞「」｛｝{}-ー―=＝~〜…":
+        elif single_str in "[]()（）<>＜＞「」【】『』〈〉《》«»［］｛｝{}-ー―=＝~〜…":
             return "rotation"
         elif single_str in " 　":
             return "blank"
@@ -220,7 +220,7 @@ class TategakiTextUtil:
         str_type = self.decision_special_character(text_object.data.body)
         if str_type == "rotation":
             # text curveからメッシュへ変換してコピー
-            _converted_object = convert_to_mesh(text_object)
+            _converted_object = convert_to_mesh(text_object, parent_inheritance=False)
             _temp_name = _converted_object.name
             bpy.context.view_layer.update()
             mesh_transform_apply(
@@ -338,7 +338,9 @@ class TategakiTextUtil:
 
             if current_str_type == "rotation":
                 # text curveからメッシュへ変換してコピー
-                _converted_object = convert_to_mesh(text_object)
+                _converted_object = convert_to_mesh(
+                    text_object, parent_inheritance=False
+                )
 
                 _temp_name = _converted_object.name
                 bpy.context.view_layer.update()
@@ -581,7 +583,16 @@ class TategakiTextUtil:
         objects = []
         for _num, line_container in lci:
             text_line = list(line_container.children)
-            objects.extend(text_line)
+            # childrenがNoneのときがあるので除外する
+            if len(text_line) == 0:
+                continue
+            else:
+                objects.extend(text_line)
+
+        logger.debug(pprint.pformat(objects))
+        body_len = sum([len(s) for s in self.state["body"]])
+        objects_len = len(objects)
+        logger.debug(f"body len:{body_len}, objects len:{objects_len}")
         mesh_objects = [convert_to_mesh(obj) for obj in objects]
         # 結合するときに都合がいいので空のメッシュオブジェクトを作る
         empty_mesh_object = self.get_empty_mesh_object(self.state["name"])
