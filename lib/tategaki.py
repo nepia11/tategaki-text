@@ -77,13 +77,13 @@ class TategakiState(TypedDict):
     resolution: int  # テキストカーブの細分化数
     body: list[str]  # 改行で分割された文字列のリスト
     text_props: list
+    body_object_name_list: list[list[str]]
     limit_length: int  # 行文字数制限
-    lines_kerning_hint: list
+    lines_kerning_hint: dict[str, BoundBoxHeight]
     line_spacing: float  # 行間
     chr_spacing: float  # 字間
     blank_size: float  # 空白文字の大きさ
-    pool: Objects
-    line_containers: dict[str, Object]  # 行ごとのコンテナ(エンプティ)
+    line_containers: dict[str, str]  # 行ごとのコンテナ(エンプティ) keyがintのdictをid-propに格納できない
     auto_kerning: bool
     materials: list[bpy.types.Material]
     font: VectorFont
@@ -174,7 +174,7 @@ class TategakiTextUtil:
     def calc_bound_box_height(bound_box):
         Y = 1
         xyz = [list(v) for v in zip(*bound_box)]  # [x,y,z]
-        result = BoundBoxHeight(max(xyz[Y]), min(xyz[Y]))
+        result = BoundBoxHeight(max=max(xyz[Y]), min=min(xyz[Y]))
         return result
 
     @staticmethod
@@ -347,7 +347,7 @@ class TategakiTextUtil:
     @timer
     def apply_auto_kerning(self, text_line: Objects):
         """縦書き文字のカーニングをする"""
-        MAX, MIN = 0, 1
+        MAX, MIN = "max", "min"
         margin = self.state["chr_spacing"]
         forward_object = None
         forward_props = {
@@ -440,6 +440,7 @@ class TategakiTextUtil:
         # apply
         # 改行済み文字propsがあるのでこれをよしなにする
         body_object_name_list = []
+        line_containers = {}
         for i0, line in enumerate(mod_text_props):
             line_names: list[str] = []
             # 行コンテナを作って位置を設定
@@ -452,17 +453,22 @@ class TategakiTextUtil:
             line_container.empty_display_size = 0.5
             line_container.hide_viewport = True
             line_container.parent = container
+            line_containers.update({str(i0): line_container.name})
             for i1, chr_prop in enumerate(line):
                 character = chr_prop["character"]
                 obj = self.character_prop_to_object(chr_prop)
                 self.set_character_transform(obj, [0, i1], character, state)
-                name = f"{tag}.{character}.{i0}.{i1}"
+                name = f"{tag}.{i0}.{i1}.{character}"
                 obj.name = name
                 obj.parent = line_container
                 # コレクションにオブジェクトをリンクしないと表示されない
                 collection.objects.link(obj)
                 line_names.append(name)
             body_object_name_list.append(line_names)
+        state["body_object_name_list"] = body_object_name_list
+        state["line_containers"] = line_containers
+        # self.update_kerning_hint()
+        self.set_state(state)
         # シーンにリンク
         if bpy.context.scene.collection.children.get(collection.name) is None:
             bpy.context.scene.collection.children.link(collection)
@@ -483,6 +489,9 @@ class TategakiTextUtil:
         font_bold_italic = data.font_bold_italic
 
         materials = list(data.materials)
+        if materials == []:
+            mat = bpy.data.materials.new("Empty_Mat")
+            materials.append(mat)
 
         state = TategakiState(
             container=container,
@@ -493,11 +502,11 @@ class TategakiTextUtil:
             body=body,
             text_props=[],
             limit_length=80,
-            lines_kerning_hint=[],
+            lines_kerning_hint=dict(),
+            body_object_name_list=[],
             line_spacing=1.0,
             chr_spacing=1.0,
             blank_size=0.5,
-            pool=[],
             line_containers=dict(),
             auto_kerning=False,
             materials=materials,
@@ -539,16 +548,19 @@ class TategakiTextUtil:
         )
         export.write(text)
 
+    @timer
     def update_lines_spacing(self):
         """stateに合わせて行間を更新する"""
         line_spacing = self.state["line_spacing"]
         lines = self.state["line_containers"]
         calc_grid_location = self.calc_grid_location
-        for key, obj in lines.items():
+        for key, name in lines.items():
             line_number = int(key)
+            obj = bpy.data.objects.get(name)
             loc = calc_grid_location(line_spacing, 0, line_number, 0)
             obj.location = loc
 
+    @timer
     def update_chr_spacing(self):
         """stateに合わせて字間を更新する"""
         auto_kerning = self.state["auto_kerning"]
@@ -558,31 +570,40 @@ class TategakiTextUtil:
         line_containers = self.state["line_containers"]
         lci = line_containers.items()
         if auto_kerning:
-            for _num, line_container in lci:
+            for _num, name in lci:
+                line_container = bpy.data.objects.get(name)
                 text_line = list(line_container.children)
                 text_line.sort(key=object_sort_function)
                 apply_auto_kerning(text_line)
         else:
-            for _num, line_container in lci:
+            for _num, name in lci:
+                line_container = bpy.data.objects.get(name)
                 text_line = list(line_container.children)
                 text_line.sort(key=object_sort_function)
                 apply_constant_kerning(text_line)
 
+    @timer
     def update_kerning_hint(self):
         """stateに合わせてカーニングヒントを更新する"""
         state = self.state
         calc_kerning_hint = self.calc_kerning_hint
         line_containers = state["line_containers"]
         lci = line_containers.items()
-        kerning_hints = []
-        for _num, line_container in lci:
+        kerning_hints = {}
+        for _num, name in lci:
+            line_container = bpy.data.objects.get(name)
             text_line = list(line_container.children)
             text_line.sort(key=object_sort_function)
             # 行ごとのヒント情報を計算
-            line_hints = [calc_kerning_hint(obj) for obj in text_line]
-            kerning_hints.append(line_hints)
+            line_hints = {obj.name: calc_kerning_hint(obj) for obj in text_line}
+            kerning_hints.update(line_hints)
+            logger.debug(line_hints)
+        logger.debug(kerning_hints)
         state["lines_kerning_hint"] = kerning_hints
+        self.set_state(state)
+        return kerning_hints
 
+    @timer
     def to_mesh(self, context, resolution=3):
         """縦書きテキストをメッシュに変換する"""
         line_containers = self.state["line_containers"]
