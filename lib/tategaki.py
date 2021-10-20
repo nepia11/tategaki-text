@@ -356,70 +356,46 @@ class TategakiTextUtil:
         """縦書き文字のカーニングをする"""
         MAX, MIN = "max", "min"
         margin = self.state["chr_spacing"]
+        # 一つ前のオブジェクトの情報
         forward_object = None
-        forward_props = {
-            "bound_box_height": [0, 0],
-            "bound_bottom": 0,
-            "global_bound_bottom": 0,
-            "location_y": 0,
-        }
+        # forward_bound_box_height = BoundBoxHeight(max=0, min=0)
+        # forward_bound_bottom = 0.0
+        forward_global_bound_bottom = 0.0
+        # forward_location_y = 0.0
 
         for i, text_object in enumerate(text_line):
             # text_object: Object
-            # hint = self.state["kerning_hints"].get(text_object.name)
+            hint = self.state["kerning_hints"].get(text_object.name)
+            if hint is None:
+                hint = self.calc_kerning_hint(text_object)
+                self.state["kerning_hints"].update({text_object.name: hint})
+
             current_str_type = self.decision_special_character(text_object.data.body)
 
             if current_str_type == "rotation":
-                # text curveからメッシュへ変換してコピー
-                _converted_object = convert_to_mesh(
-                    text_object, parent_inheritance=False
-                )
-
-                _temp_name = _converted_object.name
-                bpy.context.view_layer.update()
-
-                mesh_transform_apply(
-                    _converted_object, location=False, rotation=True, world=False
-                )
-                bpy.context.view_layer.update()
-
-                local_current_bound_box_height = self.calc_bound_box_height(
-                    bpy.data.objects[_temp_name].bound_box
-                )
-                local_current_bound_top = local_current_bound_box_height[MAX]
-
-                bpy.data.objects.remove(bpy.data.objects[_temp_name])
+                local_current_bound_box_height = hint
+                local_current_bound_top = local_current_bound_box_height["max"]
 
             elif current_str_type == "blank":
-                local_current_bound_box_height = self.calc_bound_box_height(
-                    text_object.bound_box
-                )
+                local_current_bound_box_height = hint
                 local_current_bound_top = self.state["blank_size"]
             else:
-                local_current_bound_box_height = self.calc_bound_box_height(
-                    text_object.bound_box
-                )
-                local_current_bound_top = local_current_bound_box_height[MAX]
+                local_current_bound_box_height = hint
+                local_current_bound_top = local_current_bound_box_height["max"]
             # 今のオブジェクトのy座標（グローバル） マージンも反映する
             if i == 0:
                 current_location_y = (
-                    forward_props["global_bound_bottom"] - local_current_bound_top
+                    forward_global_bound_bottom - local_current_bound_top
                 )
             else:
                 current_location_y = (
-                    forward_props["global_bound_bottom"]
-                    - local_current_bound_top
-                    - margin
+                    forward_global_bound_bottom - local_current_bound_top - margin
                 )
             text_object.location[1] = current_location_y
+
             forward_object = text_object
-            current_bound_bottom = local_current_bound_box_height[MIN]
-            forward_props = {
-                "bound_box_height": local_current_bound_box_height,
-                "bound_bottom": current_bound_bottom,
-                "global_bound_bottom": current_bound_bottom + current_location_y,
-                "location_y": current_location_y,
-            }
+            current_bound_bottom = local_current_bound_box_height["min"]
+            forward_global_bound_bottom = current_bound_bottom + current_location_y
 
     @timer
     def convert_text_object(self, text_object: Object):
@@ -557,7 +533,9 @@ class TategakiTextUtil:
         export.write(text)
 
     @timer
-    def update_lines_spacing(self):
+    def update_lines_spacing(self, state: TategakiState = None):
+        if state is None:
+            state = self.state
         """stateに合わせて行間を更新する"""
         line_spacing = self.state["line_spacing"]
         lines = self.state["line_containers"]
@@ -569,7 +547,9 @@ class TategakiTextUtil:
             obj.location = loc
 
     @timer
-    def update_chr_spacing(self):
+    def update_chr_spacing(self, state: TategakiState = None):
+        if state is None:
+            state = self.state
         """stateに合わせて字間を更新する"""
         auto_kerning = self.state["auto_kerning"]
         chr_spacing = self.state["chr_spacing"]
@@ -591,9 +571,10 @@ class TategakiTextUtil:
                 apply_constant_kerning(text_line)
 
     @timer
-    def update_kerning_hint(self):
+    def update_kerning_hint(self, state: TategakiState = None):
         """stateに合わせてカーニングヒントを更新する"""
-        state = self.state
+        if state is None:
+            state = self.state
         calc_kerning_hint = self.calc_kerning_hint
         line_containers = state["line_containers"]
         lci = line_containers.items()
@@ -612,7 +593,7 @@ class TategakiTextUtil:
         return kerning_hints
 
     @timer
-    def to_mesh(self, context, resolution=3):
+    def to_mesh(self, context, resolution=2):
         """縦書きテキストをメッシュに変換する"""
         line_containers = self.state["line_containers"]
         lci = line_containers.items()
@@ -716,24 +697,31 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
         if context.object != self.obj:
             return {"CANCELD"}
         else:
-            state = t_util.get_state()
-            # 行幅の更新確認
-            if state["line_spacing"] == self.line_spacing:
-                logger.debug("same line_spacing")
-            else:
-                state["line_spacing"] = self.line_spacing
-                t_util.set_state(state)
-                t_util.update_lines_spacing()
+            # # 行幅の更新確認
+            # if self.state["line_spacing"] == self.line_spacing:
+            #     logger.debug("same line_spacing")
+            # else:
+            #     self.state["line_spacing"] = self.line_spacing
+            #     t_util.set_state(self.state)
+            #     t_util.update_lines_spacing()
 
-            if (state["chr_spacing"] == self.chr_spacing) and (
-                state["auto_kerning"] == self.auto_kerning
-            ):
-                logger.debug("same chr_spacing")
-            else:
-                state["auto_kerning"] = self.auto_kerning
-                state["chr_spacing"] = self.chr_spacing
-                t_util.set_state(state)
-                t_util.update_chr_spacing()
+            # if (self.state["chr_spacing"] == self.chr_spacing) and (
+            #     self.state["auto_kerning"] == self.auto_kerning
+            # ):
+            #     logger.debug("same chr_spacing")
+            # else:
+            #     self.state["auto_kerning"] = self.auto_kerning
+            #     self.state["chr_spacing"] = self.chr_spacing
+            #     t_util.set_state(self.state)
+            #     t_util.update_chr_spacing()
+
+            # ↑部分変更しようとしたけどexecute毎にオブジェクトが初期状態に戻る？のでできなかった
+            self.state["line_spacing"] = self.line_spacing
+            self.state["chr_spacing"] = self.chr_spacing
+            self.state["auto_kerning"] = self.auto_kerning
+            t_util.set_state(self.state)
+            t_util.update_lines_spacing()
+            t_util.update_chr_spacing()
 
         return {"FINISHED"}
 
@@ -745,6 +733,7 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
             self.t_util = TategakiTextUtil()
             self.first_state = self.t_util.load_object_state(self.obj)
             self.t_util.update_kerning_hint()
+            self.state = self.t_util.get_state()
             # propを初期化
             self.line_spacing = self.first_state["line_spacing"]
             self.chr_spacing = self.first_state["chr_spacing"]
