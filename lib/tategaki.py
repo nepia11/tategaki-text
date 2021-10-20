@@ -1,5 +1,12 @@
 import bpy
-from bpy.types import Material, TextCurve, Object, VectorFont, TextCharacterFormat
+from bpy.types import (
+    Context,
+    Material,
+    TextCurve,
+    Object,
+    VectorFont,
+    TextCharacterFormat,
+)
 import mathutils
 from logging import getLogger
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
@@ -79,7 +86,7 @@ class TategakiState(TypedDict):
     text_props: list
     body_object_name_list: list[list[str]]
     limit_length: int  # 行文字数制限
-    lines_kerning_hint: dict[str, BoundBoxHeight]
+    kerning_hints: dict[str, BoundBoxHeight]
     line_spacing: float  # 行間
     chr_spacing: float  # 字間
     blank_size: float  # 空白文字の大きさ
@@ -359,6 +366,7 @@ class TategakiTextUtil:
 
         for i, text_object in enumerate(text_line):
             # text_object: Object
+            # hint = self.state["kerning_hints"].get(text_object.name)
             current_str_type = self.decision_special_character(text_object.data.body)
 
             if current_str_type == "rotation":
@@ -467,7 +475,7 @@ class TategakiTextUtil:
             body_object_name_list.append(line_names)
         state["body_object_name_list"] = body_object_name_list
         state["line_containers"] = line_containers
-        # self.update_kerning_hint()
+        self.update_kerning_hint()
         self.set_state(state)
         # シーンにリンク
         if bpy.context.scene.collection.children.get(collection.name) is None:
@@ -502,7 +510,7 @@ class TategakiTextUtil:
             body=body,
             text_props=[],
             limit_length=80,
-            lines_kerning_hint=dict(),
+            kerning_hints=dict(),
             body_object_name_list=[],
             line_spacing=1.0,
             chr_spacing=1.0,
@@ -597,9 +605,9 @@ class TategakiTextUtil:
             # 行ごとのヒント情報を計算
             line_hints = {obj.name: calc_kerning_hint(obj) for obj in text_line}
             kerning_hints.update(line_hints)
-            logger.debug(line_hints)
-        logger.debug(kerning_hints)
-        state["lines_kerning_hint"] = kerning_hints
+            # logger.debug(line_hints)
+        # logger.debug(kerning_hints)
+        state["kerning_hints"] = kerning_hints
         self.set_state(state)
         return kerning_hints
 
@@ -704,22 +712,49 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
             return False
 
     def execute(self, context):
-        active_object: Object = context.active_object
-        if TATEGAKI in active_object.keys():
-            t_util = TategakiTextUtil()
-            state = t_util.load_object_state(active_object)
-            logger.debug(f"{self.chr_spacing},{self.line_spacing},{self.auto_kerning}")
-            state["chr_spacing"] = self.chr_spacing
-            state["line_spacing"] = self.line_spacing
-            state["auto_kerning"] = self.auto_kerning
-            t_util.set_state(state)
-            t_util.update_lines_spacing()
-            t_util.update_chr_spacing()
-            return {"FINISHED"}
+        t_util = self.t_util
+        if context.object != self.obj:
+            return {"CANCELD"}
         else:
-            # pollで弾くので普通は表示されない
-            self.report({"ERROR"}, f"active object is not tategaki-text-container")
-            return {"CANCELED"}
+            state = t_util.get_state()
+            # 行幅の更新確認
+            if state["line_spacing"] == self.line_spacing:
+                logger.debug("same line_spacing")
+            else:
+                state["line_spacing"] = self.line_spacing
+                t_util.set_state(state)
+                t_util.update_lines_spacing()
+
+            if (state["chr_spacing"] == self.chr_spacing) and (
+                state["auto_kerning"] == self.auto_kerning
+            ):
+                logger.debug("same chr_spacing")
+            else:
+                state["auto_kerning"] = self.auto_kerning
+                state["chr_spacing"] = self.chr_spacing
+                t_util.set_state(state)
+                t_util.update_chr_spacing()
+
+        return {"FINISHED"}
+
+    def invoke(self, context: Context, event):
+        if context.object:
+            wm = context.window_manager
+            # 初期化　初期値保存
+            self.obj = context.object
+            self.t_util = TategakiTextUtil()
+            self.first_state = self.t_util.load_object_state(self.obj)
+            self.t_util.update_kerning_hint()
+            # propを初期化
+            self.line_spacing = self.first_state["line_spacing"]
+            self.chr_spacing = self.first_state["chr_spacing"]
+            self.auto_kerning = self.first_state["auto_kerning"]
+
+            return wm.invoke_props_popup(self, event)
+            # return wm.invoke_props_dialog(self)
+        else:
+            self.report({"WARNING"}, "No active object, could not finish")
+            return {"CANCELLED"}
 
 
 class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
@@ -794,7 +829,7 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
-        layout.operator(TATEGAKI_OT_UpdateObject.bl_idname, text="行間・字間調整")
+        upd = layout.operator(TATEGAKI_OT_UpdateObject.bl_idname, text="行間・字間調整")
         layout.operator(TATEGAKI_OT_FreezeObject.bl_idname, text="メッシュに変換")
 
 
