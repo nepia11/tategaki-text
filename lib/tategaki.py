@@ -482,7 +482,7 @@ class TategakiTextUtil:
             original=original,
             name=random_name(8),
             tag=random_name(8),
-            resolution=3,
+            resolution=2,
             body=body,
             text_props=[],
             limit_length=80,
@@ -598,7 +598,8 @@ class TategakiTextUtil:
         line_containers = self.state["line_containers"]
         lci = line_containers.items()
         objects: Objects = []
-        for _num, line_container in lci:
+        for _num, container_name in lci:
+            line_container = bpy.data.objects.get(container_name)
             text_line: Objects = list(line_container.children)
             # childrenがNoneのときがあるので除外する
             if len(text_line) == 0:
@@ -732,7 +733,8 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
             self.obj = context.object
             self.t_util = TategakiTextUtil()
             self.first_state = self.t_util.load_object_state(self.obj)
-            self.t_util.update_kerning_hint()
+            if self.t_util.state["kerning_hints"] == {}:
+                self.t_util.update_kerning_hint()
             self.state = self.t_util.get_state()
             # propを初期化
             self.line_spacing = self.first_state["line_spacing"]
@@ -756,7 +758,7 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
 
-    resolution: bpy.props.IntProperty(name="resolution", default=3)
+    resolution: bpy.props.IntProperty(name="resolution", default=2)
 
     @classmethod
     def poll(cls, context):
