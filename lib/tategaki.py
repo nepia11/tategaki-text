@@ -303,7 +303,7 @@ class TategakiTextUtil:
         return bound_box_height
 
     """オブジェクト操作"""
-    # これを調整していい感じにしよう
+
     def set_character_transform(
         self,
         text_object: Object,
@@ -354,14 +354,9 @@ class TategakiTextUtil:
     @timer
     def apply_auto_kerning(self, text_line: Objects):
         """縦書き文字のカーニングをする"""
-        MAX, MIN = "max", "min"
         margin = self.state["chr_spacing"]
         # 一つ前のオブジェクトの情報
-        forward_object = None
-        # forward_bound_box_height = BoundBoxHeight(max=0, min=0)
-        # forward_bound_bottom = 0.0
         forward_global_bound_bottom = 0.0
-        # forward_location_y = 0.0
 
         for i, text_object in enumerate(text_line):
             # text_object: Object
@@ -375,7 +370,6 @@ class TategakiTextUtil:
             if current_str_type == "rotation":
                 local_current_bound_box_height = hint
                 local_current_bound_top = local_current_bound_box_height["max"]
-
             elif current_str_type == "blank":
                 local_current_bound_box_height = hint
                 local_current_bound_top = self.state["blank_size"]
@@ -391,11 +385,35 @@ class TategakiTextUtil:
                 current_location_y = (
                     forward_global_bound_bottom - local_current_bound_top - margin
                 )
-            text_object.location[1] = current_location_y
 
-            forward_object = text_object
+            text_object.location[1] = current_location_y
             current_bound_bottom = local_current_bound_box_height["min"]
             forward_global_bound_bottom = current_bound_bottom + current_location_y
+
+    def get_line_container(self, index: int):
+        state = self.state
+        tag = state["tag"]
+        collection_name = state["name"]
+        container = state["container"]
+        line_containers = state["line_containers"]
+        # 行コンテナを作って位置を設定
+        line_container_name = line_containers.get(str(index))
+        if line_container_name is None:
+            line_container_name = f"{tag}.{index}"
+            line_container = self.get_empty(collection_name)
+            line_container.name = line_container_name
+            line_containers.update({str(index): line_container_name})
+        else:
+            line_container = bpy.data.objects.get(line_container_name)
+            logger.debug(line_container)
+        line_container.location = self.calc_grid_location(
+            state["line_spacing"], 0, index, 0
+        )
+        # 行コンテナを非表示にしておく
+        line_container.empty_display_size = 0.5
+        line_container.hide_viewport = True
+        line_container.parent = container
+        return line_container
 
     @timer
     def convert_text_object(self, text_object: Object):
@@ -425,29 +443,22 @@ class TategakiTextUtil:
         # 改行済み文字propsがあるのでこれをよしなにする
         body_object_name_list = []
         line_containers = {}
+        chr_count = 0
         for i0, line in enumerate(mod_text_props):
             line_names: list[str] = []
-            # 行コンテナを作って位置を設定
-            line_container = self.get_empty(collection_name)
-            line_container.name = f"{tag}.{i0}"
-            line_container.location = self.calc_grid_location(
-                state["line_spacing"], 0, i0, 0
-            )
-            # 行コンテナを非表示にしておく
-            line_container.empty_display_size = 0.5
-            line_container.hide_viewport = True
-            line_container.parent = container
+            line_container = self.get_line_container(index=i0)
             line_containers.update({str(i0): line_container.name})
             for i1, chr_prop in enumerate(line):
                 character = chr_prop["character"]
                 obj = self.character_prop_to_object(chr_prop)
                 self.set_character_transform(obj, [0, i1], character, state)
-                name = f"{tag}.{i0}.{i1}.{character}"
+                name = f"{tag}.{chr_count}.{character}"
                 obj.name = name
                 obj.parent = line_container
                 # コレクションにオブジェクトをリンクしないと表示されない
                 collection.objects.link(obj)
                 line_names.append(name)
+                chr_count += 1
             body_object_name_list.append(line_names)
         state["body_object_name_list"] = body_object_name_list
         state["line_containers"] = line_containers
@@ -534,9 +545,9 @@ class TategakiTextUtil:
 
     @timer
     def update_lines_spacing(self, state: TategakiState = None):
+        """stateに合わせて行間を更新する"""
         if state is None:
             state = self.state
-        """stateに合わせて行間を更新する"""
         line_spacing = self.state["line_spacing"]
         lines = self.state["line_containers"]
         calc_grid_location = self.calc_grid_location
@@ -548,9 +559,9 @@ class TategakiTextUtil:
 
     @timer
     def update_chr_spacing(self, state: TategakiState = None):
+        """stateに合わせて字間を更新する"""
         if state is None:
             state = self.state
-        """stateに合わせて字間を更新する"""
         auto_kerning = self.state["auto_kerning"]
         chr_spacing = self.state["chr_spacing"]
         apply_auto_kerning = self.apply_auto_kerning
@@ -569,6 +580,36 @@ class TategakiTextUtil:
                 text_line = list(line_container.children)
                 text_line.sort(key=object_sort_function)
                 apply_constant_kerning(text_line)
+
+    @timer
+    def update_limit_length(self, state: TategakiState = None):
+        if state is None:
+            state = self.state
+        # 参照しやすくする
+        tag = state["tag"]
+        limit_length = state["limit_length"]
+        text_props = state["text_props"]
+        line_containers = state["line_containers"]
+        collection = bpy.data.collections.get(state["name"])
+        mod_text_props = self.modify_text_props(text_props, limit_length)
+        chr_count = 0
+        for i0, line in enumerate(mod_text_props):
+            # 1行分のオブジェクトを取得
+            names = [
+                f"{tag}.{chr_count+i1}.{prop['character']}"
+                for i1, prop in enumerate(line)
+            ]
+            objects = [bpy.data.objects.get(name) for name in names]
+            chr_count += len(names)
+            # line_containerを取得　なかったら作成
+            line_container = self.get_line_container(index=i0)
+            line_containers.update({str(i0): line_container.name})
+
+            for i1, obj in enumerate(objects):
+                character = line[i1]["character"]
+                logger.debug(character)
+                self.set_character_transform(obj, [0, i1], character)
+                obj.parent = line_container
 
     @timer
     def update_kerning_hint(self, state: TategakiState = None):
@@ -632,6 +673,9 @@ class TategakiTextUtil:
         return bpy.data.objects[joined_object_name]
 
 
+######### Operators ###########
+
+
 class TATEGAKI_OT_AddText(bpy.types.Operator):
     """縦書きテキストオブジェクトを追加"""
 
@@ -662,7 +706,7 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
 
 
 class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
-    """縦書きテキストオブジェクトを更新する"""
+    """縦書きテキストの文字間隔と自動カーニングオプションを更新する"""
 
     bl_idname = "tategaki.update_chr_spacing"
     bl_label = "update character spacing"
@@ -716,7 +760,7 @@ class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
 
 
 class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
-    """縦書きテキストオブジェクトを更新する"""
+    """縦書きテキストの行間を更新する"""
 
     bl_idname = "tategaki.update_line_spacing"
     bl_label = "update line spacing"
@@ -744,6 +788,53 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
             self.state["line_spacing"] = self.line_spacing
             t_util.set_state(self.state)
             t_util.update_lines_spacing()
+
+        return {"FINISHED"}
+
+    def invoke(self, context: Context, event):
+        if self.poll(context):
+            wm = context.window_manager
+            self.obj = context.object
+            self.t_util = TategakiTextUtil()
+            self.first_state = self.t_util.load_object_state(self.obj)
+            self.state = self.t_util.get_state()
+            return wm.invoke_props_popup(self, event)
+        else:
+            self.report({"WARNING"}, "No active object, could not finish")
+            return {"CANCELLED"}
+
+
+class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
+    """縦書きテキストの1行あたりの文字数制限を更新する"""
+
+    bl_idname = "tategaki.update_line_limit_length"
+    bl_label = "update line limit length"
+    bl_description = ""
+    bl_options = {"REGISTER", "UNDO"}
+
+    limit_length: bpy.props.IntProperty(
+        name="line limit length",
+        description="行文字数制限",
+        default=20,
+        min=1,
+        soft_max=100,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.active_object.keys():
+            return True
+        else:
+            return False
+
+    def execute(self, context):
+        t_util = self.t_util
+        if context.object != self.obj:
+            return {"CANCELLED"}
+        else:
+            self.state["limit_length"] = self.limit_length
+            t_util.set_state(self.state)
+            t_util.update_limit_length()
 
         return {"FINISHED"}
 
@@ -810,6 +901,9 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
             return {"CANCELED"}
 
 
+######### UI ##########
+
+
 class TATEGAKI_MT_Tools(bpy.types.Menu):
     """ツールの一覧メニュー"""
 
@@ -834,6 +928,7 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
         layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
         layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname, text="字間調整")
         layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname, text="行間調整")
+        layout.operator(TATEGAKI_OT_UpdateLineLimitLength.bl_idname, text="行文字数調整")
         layout.operator(TATEGAKI_OT_FreezeObject.bl_idname, text="メッシュに変換")
 
 
@@ -843,11 +938,14 @@ def tategaki_menu(self, context):
     layout.menu(TATEGAKI_MT_Tools.bl_idname, icon="PLUGIN")
 
 
+######### registration ##########
+
 classses = [
     TATEGAKI_MT_Tools,
     TATEGAKI_OT_AddText,
     TATEGAKI_OT_UpdateChrSpacing,
     TATEGAKI_OT_UpdateLineSpacing,
+    TATEGAKI_OT_UpdateLineLimitLength,
     TATEGAKI_OT_FreezeObject,
 ]
 tools: list = []
