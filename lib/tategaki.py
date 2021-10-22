@@ -263,7 +263,7 @@ class TategakiTextUtil:
         collection = bpy.data.collections.get(collection_name)
         if collection is None:
             collection = bpy.data.collections.new(collection_name)
-        empty = bpy.data.objects.new("empty", None)
+        empty: Object = bpy.data.objects.new("empty", None)
         collection.objects.link(empty)
         return empty
 
@@ -395,17 +395,13 @@ class TategakiTextUtil:
         tag = state["tag"]
         collection_name = state["name"]
         container = state["container"]
-        line_containers = state["line_containers"]
         # 行コンテナを作って位置を設定
-        line_container_name = line_containers.get(str(index))
-        if line_container_name is None:
-            line_container_name = f"{tag}.{index}"
+        line_container_name = f"{tag}.{index}"
+        line_container = bpy.data.objects.get(line_container_name)
+        if line_container is None:
             line_container = self.get_empty(collection_name)
             line_container.name = line_container_name
-            line_containers.update({str(index): line_container_name})
-        else:
-            line_container = bpy.data.objects.get(line_container_name)
-            logger.debug(line_container)
+
         line_container.location = self.calc_grid_location(
             state["line_spacing"], 0, index, 0
         )
@@ -577,6 +573,8 @@ class TategakiTextUtil:
         else:
             for _num, name in lci:
                 line_container = bpy.data.objects.get(name)
+                if line_container is None:
+                    continue
                 text_line = list(line_container.children)
                 text_line.sort(key=object_sort_function)
                 apply_constant_kerning(text_line)
@@ -590,6 +588,7 @@ class TategakiTextUtil:
         limit_length = state["limit_length"]
         text_props = state["text_props"]
         line_containers = state["line_containers"]
+        line_containers2 = {}
         collection = bpy.data.collections.get(state["name"])
         mod_text_props = self.modify_text_props(text_props, limit_length)
         chr_count = 0
@@ -603,13 +602,13 @@ class TategakiTextUtil:
             chr_count += len(names)
             # line_containerを取得　なかったら作成
             line_container = self.get_line_container(index=i0)
-            line_containers.update({str(i0): line_container.name})
+            line_containers2.update({str(i0): line_container.name})
 
             for i1, obj in enumerate(objects):
-                character = line[i1]["character"]
-                logger.debug(character)
-                self.set_character_transform(obj, [0, i1], character)
                 obj.parent = line_container
+        state["line_containers"] = line_containers2
+        logger.debug(line_containers2)
+        # self.set_state(state)
 
     @timer
     def update_kerning_hint(self, state: TategakiState = None):
@@ -828,23 +827,20 @@ class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
             return False
 
     def execute(self, context):
-        t_util = self.t_util
-        if context.object != self.obj:
-            return {"CANCELLED"}
-        else:
-            self.state["limit_length"] = self.limit_length
-            t_util.set_state(self.state)
-            t_util.update_limit_length()
+        obj = context.object
+        t_util = TategakiTextUtil()
+        state = t_util.load_object_state(obj)
+        state["limit_length"] = self.limit_length
+        t_util.set_state(state)
+        t_util.update_limit_length()
+        t_util.update_chr_spacing()
+        t_util.save_state()
 
         return {"FINISHED"}
 
     def invoke(self, context: Context, event):
         if self.poll(context):
             wm = context.window_manager
-            self.obj = context.object
-            self.t_util = TategakiTextUtil()
-            self.first_state = self.t_util.load_object_state(self.obj)
-            self.state = self.t_util.get_state()
             return wm.invoke_props_popup(self, event)
         else:
             self.report({"WARNING"}, "No active object, could not finish")
