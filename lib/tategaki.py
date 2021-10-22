@@ -661,11 +661,11 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
+class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
     """縦書きテキストオブジェクトを更新する"""
 
-    bl_idname = "tategaki.update_object"
-    bl_label = "update tategaki object"
+    bl_idname = "tategaki.update_chr_spacing"
+    bl_label = "update character spacing"
     bl_description = ""
     bl_options = {"REGISTER", "UNDO"}
 
@@ -680,6 +680,49 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
         description="文字間隔",
         default=0.5,
     )
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.active_object.keys():
+            return True
+        else:
+            return False
+
+    def execute(self, context):
+        t_util = self.t_util
+        if context.object != self.obj:
+            return {"CANCELLED"}
+        else:
+            self.state["chr_spacing"] = self.chr_spacing
+            self.state["auto_kerning"] = self.auto_kerning
+            t_util.set_state(self.state)
+            t_util.update_chr_spacing()
+
+        return {"FINISHED"}
+
+    def invoke(self, context: Context, event):
+        if self.poll(context):
+            wm = context.window_manager
+            self.obj = context.object
+            self.t_util = TategakiTextUtil()
+            self.first_state = self.t_util.load_object_state(self.obj)
+            if self.t_util.state["kerning_hints"] == {}:
+                self.t_util.update_kerning_hint()
+            self.state = self.t_util.get_state()
+            return wm.invoke_props_popup(self, event)
+        else:
+            self.report({"WARNING"}, "No active object, could not finish")
+            return {"CANCELLED"}
+
+
+class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
+    """縦書きテキストオブジェクトを更新する"""
+
+    bl_idname = "tategaki.update_line_spacing"
+    bl_label = "update line spacing"
+    bl_description = ""
+    bl_options = {"REGISTER", "UNDO"}
+
     line_spacing: bpy.props.FloatProperty(
         name="line spacing",
         description="行間隔",
@@ -696,53 +739,22 @@ class TATEGAKI_OT_UpdateObject(bpy.types.Operator):
     def execute(self, context):
         t_util = self.t_util
         if context.object != self.obj:
-            return {"CANCELD"}
+            return {"CANCELLED"}
         else:
-            # # 行幅の更新確認
-            # if self.state["line_spacing"] == self.line_spacing:
-            #     logger.debug("same line_spacing")
-            # else:
-            #     self.state["line_spacing"] = self.line_spacing
-            #     t_util.set_state(self.state)
-            #     t_util.update_lines_spacing()
-
-            # if (self.state["chr_spacing"] == self.chr_spacing) and (
-            #     self.state["auto_kerning"] == self.auto_kerning
-            # ):
-            #     logger.debug("same chr_spacing")
-            # else:
-            #     self.state["auto_kerning"] = self.auto_kerning
-            #     self.state["chr_spacing"] = self.chr_spacing
-            #     t_util.set_state(self.state)
-            #     t_util.update_chr_spacing()
-
-            # ↑部分変更しようとしたけどexecute毎にオブジェクトが初期状態に戻る？のでできなかった
             self.state["line_spacing"] = self.line_spacing
-            self.state["chr_spacing"] = self.chr_spacing
-            self.state["auto_kerning"] = self.auto_kerning
             t_util.set_state(self.state)
             t_util.update_lines_spacing()
-            t_util.update_chr_spacing()
 
         return {"FINISHED"}
 
     def invoke(self, context: Context, event):
-        if context.object:
+        if self.poll(context):
             wm = context.window_manager
-            # 初期化　初期値保存
             self.obj = context.object
             self.t_util = TategakiTextUtil()
             self.first_state = self.t_util.load_object_state(self.obj)
-            if self.t_util.state["kerning_hints"] == {}:
-                self.t_util.update_kerning_hint()
             self.state = self.t_util.get_state()
-            # propを初期化
-            self.line_spacing = self.first_state["line_spacing"]
-            self.chr_spacing = self.first_state["chr_spacing"]
-            self.auto_kerning = self.first_state["auto_kerning"]
-
             return wm.invoke_props_popup(self, event)
-            # return wm.invoke_props_dialog(self)
         else:
             self.report({"WARNING"}, "No active object, could not finish")
             return {"CANCELLED"}
@@ -820,7 +832,8 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
-        upd = layout.operator(TATEGAKI_OT_UpdateObject.bl_idname, text="行間・字間調整")
+        layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname, text="字間調整")
+        layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname, text="行間調整")
         layout.operator(TATEGAKI_OT_FreezeObject.bl_idname, text="メッシュに変換")
 
 
@@ -831,9 +844,10 @@ def tategaki_menu(self, context):
 
 
 classses = [
-    TATEGAKI_OT_AddText,
     TATEGAKI_MT_Tools,
-    TATEGAKI_OT_UpdateObject,
+    TATEGAKI_OT_AddText,
+    TATEGAKI_OT_UpdateChrSpacing,
+    TATEGAKI_OT_UpdateLineSpacing,
     TATEGAKI_OT_FreezeObject,
 ]
 tools: list = []

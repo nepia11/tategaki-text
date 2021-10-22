@@ -3,6 +3,7 @@
   "python.formatting.provider": "black",
   "python.linting.enabled": true,
   "cSpell.words": [
+    "atoi",
     "Autobuild",
     "codeql",
     "colorsys",
