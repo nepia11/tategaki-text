@@ -1,6 +1,7 @@
 import random
 import string
 import bpy
+from bpy.types import Material
 import mathutils
 from time import time
 from logging import getLogger
@@ -12,7 +13,7 @@ logger = getLogger(__name__)
 def random_name(n: int) -> str:
     """引数で指定した桁数のランダムなstrを返す"""
     if n < 0:
-        return ValueError
+        raise ValueError
     return "".join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
@@ -115,16 +116,25 @@ def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types
     変換可能なオブジェクトをメッシュオブジェクトに変換する
     :return converted_object
     """
+    # generate object
     mesh = obj.to_mesh()
     if mesh is None:
         mesh = bpy.data.meshes.new("empty_mesh")
     else:
         mesh = mesh.copy()
-    _converted_object = bpy.data.objects.new(mesh.name, mesh)
+    _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", mesh)
     bpy.context.scene.collection.objects.link(_converted_object)
+    # transform
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler
     _converted_object.scale = obj.scale
+    # material
+    if len(mesh.materials) != 0:
+        material_names = obj.material_slots.keys()
+        for i, name in enumerate(material_names):
+            material = bpy.data.materials.get(name)
+            _converted_object.data.materials[i] = material
+    # parent
     if parent_inheritance:
         _converted_object.parent = obj.parent
     return _converted_object
@@ -135,6 +145,7 @@ def convert_to_curve(
 ) -> bpy.types.Object:
     """
     変換可能なオブジェクトをカーブオブジェクトに変換する
+    うまく行かない
     :return converted_object
     """
     curve = obj.to_curve(bpy.context.evaluated_depsgraph_get())
@@ -142,11 +153,18 @@ def convert_to_curve(
         curve = bpy.data.curves.new("empty_curve", "CURVE")
     else:
         curve = curve.copy()
-    _converted_object = bpy.data.objects.new(curve.name, curve)
+    _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", curve)
     bpy.context.scene.collection.objects.link(_converted_object)
+    # transform
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler
     _converted_object.scale = obj.scale
+    # material
+    if len(obj.data.materials) != 0:
+        material_names = obj.material_slots.keys()
+        for i, name in enumerate(material_names):
+            material = bpy.data.materials.get(name)
+            _converted_object.data.materials[i] = material
     if parent_inheritance:
         _converted_object.parent = obj.parent
     return _converted_object

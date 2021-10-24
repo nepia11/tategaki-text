@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import (
     Context,
+    Curve,
     Material,
     TextCurve,
     Object,
@@ -276,6 +277,17 @@ class TategakiTextUtil:
         name = random_name(8)
         mesh = bpy.data.meshes.new(name)
         obj = bpy.data.objects.new(name, mesh)
+        collection.objects.link(obj)
+        return obj
+
+    @staticmethod
+    def get_empty_curve_object(collection_name: str = "tategaki_pool"):
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            collection = bpy.data.collections.new(collection_name)
+        name = random_name(8)
+        data = bpy.data.curves.new(name, "CURVE")
+        obj = bpy.data.objects.new(name, data)
         collection.objects.link(obj)
         return obj
 
@@ -633,11 +645,14 @@ class TategakiTextUtil:
         return kerning_hints
 
     @timer
-    def to_mesh(self, context, resolution=2):
-        """縦書きテキストをメッシュに変換する"""
+    def freeze(self, context, resolution=2, freeze_type: str = "MESH"):
+        """縦書きテキストをメッシュまたはカーブに変換する"""
+
         line_containers = self.state["line_containers"]
         lci = line_containers.items()
         objects: Objects = []
+
+        # オブジェクトのリストを作成
         for _num, container_name in lci:
             line_container = bpy.data.objects.get(container_name)
             text_line: Objects = list(line_container.children)
@@ -651,25 +666,86 @@ class TategakiTextUtil:
             data: TextCurve = obj.data
             data.resolution_u = resolution
 
+        # debug
         logger.debug(pprint.pformat(objects))
         body_len = sum([len(s) for s in self.state["body"]])
         objects_len = len(objects)
         logger.debug(f"body len:{body_len}, objects len:{objects_len}")
-        mesh_objects = [convert_to_mesh(obj) for obj in objects]
-        # 結合するときに都合がいいので空のメッシュオブジェクトを作る
-        empty_mesh_object = self.get_empty_mesh_object(self.state["name"])
-        empty_mesh_object.parent = self.state["container"]
-        joined_object_name = empty_mesh_object.name
-        mesh_objects.append(empty_mesh_object)
+
+        # freeze_typeに応じてカーブかメッシュに変換
+        if freeze_type == "MESH":
+
+            converted_objects = [convert_to_mesh(obj) for obj in objects]
+            # 結合するときに都合がいいので空のメッシュオブジェクトを作る
+            empty_object = self.get_empty_mesh_object(self.state["name"])
+
+        elif freeze_type == "CURVE":
+
+            materials = self.state["materials"]
+            material_keys = [mat.name for mat in materials]
+
+            for obj in objects:
+                # コピーを作らないと重複文字がリンクデータなのでおかしくなる
+                obj.data = obj.data.copy()
+
+            bpy.ops.object.select_all(action="DESELECT")
+            object_names = [obj.name for obj in objects]
+
+            for obj in objects:
+                obj.select_set(True)
+
+            bpy.context.view_layer.objects.active = objects[0]
+            bpy.ops.object.convert(target="CURVE")
+            converted_objects = [bpy.data.objects.get(name) for name in object_names]
+
+            # マテリアルをよしなにする
+            for obj in converted_objects:
+                # マテリアルインデックスの交換対応表を作る
+                src_materials_keys = obj.material_slots.keys()
+                mat_exchage_index = [
+                    material_keys.index(keys) for keys in src_materials_keys
+                ]
+
+                # materialsを初期化
+                obj.data.materials.clear()
+                for mat in materials:
+                    obj.data.materials.append(mat)
+
+                # curveのマテリアルインデックスを対応表に応じて交換
+                for spline in obj.data.splines:
+                    src_index = spline.material_index
+                    spline.material_index = mat_exchage_index[src_index]
+
+            # 統合オブジェクトを作るときの位置調整用空カーブオブジェクトを作る
+            empty_object = self.get_empty_curve_object(self.state["name"])
+
+            for mat in materials:
+                empty_object.data.materials.append(mat)
+
+        else:
+            logger.debug(f"freeze_type='{freeze_type}' is invalid. 'MESH' or 'CURVE'")
+            raise TypeError
+
+        empty_object.parent = self.state["container"]
+        empty_object.name = f"{self.state['name']}.freeze"
+        joined_object_name = empty_object.name
+        converted_objects.append(empty_object)
+
         # オーバーライドコンテキストを作る
         override = context.copy()
-        override["selected_objects"] = mesh_objects
-        override["selected_editable_objects"] = mesh_objects
+        override["selected_objects"] = converted_objects
+        override["selected_editable_objects"] = converted_objects
         override["active_object"] = bpy.data.objects[joined_object_name]
         bpy.ops.object.join(override)
+
         location = self.state["container"].location
-        bpy.data.objects[joined_object_name].location = location
-        return bpy.data.objects[joined_object_name]
+        joint_object = bpy.data.objects[joined_object_name]
+        joint_object.location = location
+
+        if freeze_type == "CURVE":
+            _data: Curve = joint_object.data
+            _data.fill_mode = "FRONT"
+        return joint_object
 
 
 ######### Operators ###########
@@ -740,6 +816,7 @@ class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
             self.state["auto_kerning"] = self.auto_kerning
             t_util.set_state(self.state)
             t_util.update_chr_spacing()
+            # t_util.save_state()  # 検証する
 
         return {"FINISHED"}
 
@@ -787,6 +864,7 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
             self.state["line_spacing"] = self.line_spacing
             t_util.set_state(self.state)
             t_util.update_lines_spacing()
+            # t_util.save_state()  # 検証する
 
         return {"FINISHED"}
 
@@ -847,17 +925,23 @@ class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
+class TATEGAKI_OT_Freeze(bpy.types.Operator):
     """縦書きテキストオブジェクトをメッシュまたはカーブに変換する"""
 
     bl_idname = "tategaki.freeze"
-    bl_label = "freeze tategaki object"
+    bl_label = "freeze"
     bl_description = "縦書きテキストオブジェクトをメッシュまたはカーブに変換する"
     bl_options = {"REGISTER", "UNDO"}
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
 
     resolution: bpy.props.IntProperty(name="resolution", default=2)
+
+    freeze_type: bpy.props.EnumProperty(
+        name="freeze_type",
+        default="MESH",
+        items=[("MESH", "MESH", ""), ("CURVE", "CURVE", "")],
+    )
 
     @classmethod
     def poll(cls, context):
@@ -871,26 +955,39 @@ class TATEGAKI_OT_FreezeObject(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context):
         active_object: Object = context.active_object
+
         if TATEGAKI in active_object.keys():
+
             t_util = TategakiTextUtil()
             t_util.load_object_state(active_object)
             location = active_object.location
-            obj = t_util.to_mesh(context, resolution=self.resolution)
-            obj.name = t_util.state["name"] + ".freeze"
-            collection = t_util.get_collection(t_util.state["name"])
+
+            obj = t_util.freeze(context, self.resolution, self.freeze_type)
+
+            obj.name = f"{t_util.state['name']}.freeze"
             obj.parent = None
+            collection = t_util.get_collection(t_util.state["name"])
             collection.objects.unlink(obj)
             context.scene.collection.objects.link(obj)
             obj.location = location
+
             if self.keep_original is False:
                 # コレクションの中身と自身を削除
                 all_objects = list(collection.all_objects)
+
                 for obj in all_objects:
                     bpy.data.objects.remove(obj)
+
                 bpy.data.collections.remove(collection)
+                bpy.ops.outliner.orphans_purge(
+                    do_local_ids=True, do_linked_ids=True, do_recursive=True
+                )
+
                 return {"FINISHED"}
             else:
-                pass
+                # keep_object Trueのときの処理を書こうと思ったけどめんどくさくなった
+                return {"FINISHED"}
+
         else:
             # pollで弾くので普通は表示されない
             self.report({"ERROR"}, f"active object is not tategaki-text-container")
@@ -922,10 +1019,15 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
+        layout.separator()
         layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname, text="字間調整")
         layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname, text="行間調整")
         layout.operator(TATEGAKI_OT_UpdateLineLimitLength.bl_idname, text="行文字数調整")
-        layout.operator(TATEGAKI_OT_FreezeObject.bl_idname, text="メッシュに変換")
+        layout.separator()
+        mesh_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="メッシュに変換")
+        mesh_freeze_prop.freeze_type = "MESH"
+        curve_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="カーブに変換")
+        curve_freeze_prop.freeze_type = "CURVE"
 
 
 def tategaki_menu(self, context):
@@ -942,7 +1044,7 @@ classses = [
     TATEGAKI_OT_UpdateChrSpacing,
     TATEGAKI_OT_UpdateLineSpacing,
     TATEGAKI_OT_UpdateLineLimitLength,
-    TATEGAKI_OT_FreezeObject,
+    TATEGAKI_OT_Freeze,
 ]
 tools: list = []
 
