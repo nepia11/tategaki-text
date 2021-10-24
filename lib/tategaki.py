@@ -269,7 +269,6 @@ class TategakiTextUtil:
         return empty
 
     @staticmethod
-    @timer
     def get_empty_mesh_object(collection_name: str = "tategaki_pool"):
         collection = bpy.data.collections.get(collection_name)
         if collection is None:
@@ -363,7 +362,6 @@ class TategakiTextUtil:
             # 座標設定
             text_object.location = location
 
-    @timer
     def apply_auto_kerning(self, text_line: Objects):
         """縦書き文字のカーニングをする"""
         margin = self.state["chr_spacing"]
@@ -619,7 +617,7 @@ class TategakiTextUtil:
             for i1, obj in enumerate(objects):
                 obj.parent = line_container
         state["line_containers"] = line_containers2
-        logger.debug(line_containers2)
+        # logger.debug(line_containers2)
         # self.set_state(state)
 
     @timer
@@ -667,7 +665,7 @@ class TategakiTextUtil:
             data.resolution_u = resolution
 
         # debug
-        logger.debug(pprint.pformat(objects))
+        # logger.debug(pprint.pformat(objects))
         body_len = sum([len(s) for s in self.state["body"]])
         objects_len = len(objects)
         logger.debug(f"body len:{body_len}, objects len:{objects_len}")
@@ -785,7 +783,7 @@ class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
 
     bl_idname = "tategaki.update_chr_spacing"
     bl_label = "update character spacing"
-    bl_description = ""
+    bl_description = "縦書きテキストの文字間隔と自動カーニングオプションを更新する"
     bl_options = {"REGISTER", "UNDO"}
 
     auto_kerning: bpy.props.BoolProperty(
@@ -840,7 +838,7 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
 
     bl_idname = "tategaki.update_line_spacing"
     bl_label = "update line spacing"
-    bl_description = ""
+    bl_description = "縦書きテキストの行間を更新する"
     bl_options = {"REGISTER", "UNDO"}
 
     line_spacing: bpy.props.FloatProperty(
@@ -886,7 +884,7 @@ class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
 
     bl_idname = "tategaki.update_line_limit_length"
     bl_label = "update line limit length"
-    bl_description = ""
+    bl_description = "縦書きテキストの1行あたりの文字数制限を更新する"
     bl_options = {"REGISTER", "UNDO"}
 
     limit_length: bpy.props.IntProperty(
