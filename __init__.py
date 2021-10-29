@@ -1,5 +1,6 @@
 import importlib
-from logging import getLogger, StreamHandler, Formatter, handlers, DEBUG
+from logging import getLogger, StreamHandler, Formatter, handlers, DEBUG, INFO
+from typing import Final
 import sys
 import os
 import datetime
@@ -27,19 +28,23 @@ module_names = [
 ]
 
 
+LOGLEVEL = DEBUG
+# LOGLEVEL = INFO
+
+
 def setup_logger(log_folder: str, modname=__name__):
     """loggerの設定をする"""
     logger = getLogger(modname)
-    logger.setLevel(DEBUG)
+    logger.setLevel(LOGLEVEL)
     # log重複回避　https://nigimitama.hatenablog.jp/entry/2021/01/27/084458
     if not logger.hasHandlers():
         sh = StreamHandler()
-        sh.setLevel(DEBUG)
+        sh.setLevel(LOGLEVEL)
         formatter = Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         sh.setFormatter(formatter)
         logger.addHandler(sh)
         fh = handlers.RotatingFileHandler(log_folder, maxBytes=500000, backupCount=2)
-        fh.setLevel(DEBUG)
+        fh.setLevel(LOGLEVEL)
         fh_formatter = Formatter(
             "%(asctime)s - %(filename)s - %(name)s"
             " - %(lineno)d - %(levelname)s - %(message)s"
@@ -73,7 +78,7 @@ def register():
         module.register()
     _name = bl_info["name"]
     _version = bl_info["version"]
-    logger.debug(f"registered {_name}:version{_version}")
+    logger.info(f"registered {_name}:version{_version}")
 
 
 def unregister():
@@ -81,7 +86,7 @@ def unregister():
         module.unregister()
     _name = bl_info["name"]
     _version = bl_info["version"]
-    logger.debug(f"unregistered {_name}:version{_version}")
+    logger.info(f"unregistered {_name}:version{_version}")
 
 
 if __name__ == "__main__":

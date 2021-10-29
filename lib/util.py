@@ -43,8 +43,8 @@ def calc_vector_length(a: mathutils.Vector, b: mathutils.Vector) -> float:
 def gp_licker(gp_data: bpy.types.GreasePencil, func, state={}):
 
     if type(gp_data) is not bpy.types.GreasePencil:
-        logger.debug("not gpencil")
-        return 1
+        logger.info("not gpencil")
+        raise TypeError
 
     for li, layer in enumerate(gp_data.layers):
         func(state["layers"][li], layer, "layer")

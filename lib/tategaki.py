@@ -1,3 +1,4 @@
+import math
 import bpy
 from bpy.types import (
     Context,
@@ -7,15 +8,15 @@ from bpy.types import (
     Object,
     VectorFont,
     TextCharacterFormat,
+    DecimateModifier,
+    EdgeSplitModifier,
 )
 import mathutils
 from logging import getLogger
 from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
-from math import pi
 import os
 import pprint
-from typing import NamedTuple, TypedDict, Final
-from collections import namedtuple
+from typing import TypedDict, Final
 import re
 
 # setup
@@ -339,7 +340,7 @@ class TategakiTextUtil:
             offset = self.calc_punctuation_offset(center)
             location = mathutils.Vector(location) + mathutils.Vector(offset)
         elif str_type == "rotation":
-            rotation = (0.0, 0.0, 0.0 - pi / 2)
+            rotation = (0.0, 0.0, math.radians(-90))
             # 回転設定
             text_object.rotation_euler = rotation
         # 座標設定
@@ -668,7 +669,7 @@ class TategakiTextUtil:
         # logger.debug(pprint.pformat(objects))
         body_len = sum([len(s) for s in self.state["body"]])
         objects_len = len(objects)
-        logger.debug(f"body len:{body_len}, objects len:{objects_len}")
+        logger.info(f"body len:{body_len}, objects len:{objects_len}")
 
         # freeze_typeに応じてカーブかメッシュに変換
         if freeze_type == "MESH":
@@ -721,7 +722,7 @@ class TategakiTextUtil:
                 empty_object.data.materials.append(mat)
 
         else:
-            logger.debug(f"freeze_type='{freeze_type}' is invalid. 'MESH' or 'CURVE'")
+            logger.info(f"freeze_type='{freeze_type}' is invalid. 'MESH' or 'CURVE'")
             raise TypeError
 
         empty_object.parent = self.state["container"]
@@ -924,11 +925,11 @@ class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
 
 
 class TATEGAKI_OT_Freeze(bpy.types.Operator):
-    """縦書きテキストオブジェクトをメッシュまたはカーブに変換する"""
+    """縦書きテキストオブジェクトをメッシュ、カーブ、gpencilに変換する"""
 
     bl_idname = "tategaki.freeze"
     bl_label = "freeze"
-    bl_description = "縦書きテキストオブジェクトをメッシュまたはカーブに変換する"
+    bl_description = "縦書きテキストオブジェクトをメッシュ、カーブ、gpencilに変換する"
     bl_options = {"REGISTER", "UNDO"}
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
@@ -938,7 +939,11 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
     freeze_type: bpy.props.EnumProperty(
         name="freeze_type",
         default="MESH",
-        items=[("MESH", "MESH", ""), ("CURVE", "CURVE", "")],
+        items=[
+            ("MESH", "MESH", ""),
+            ("CURVE", "CURVE", ""),
+            ("GPENCIL", "GPENCIL", ""),
+        ],
     )
 
     @classmethod
@@ -960,7 +965,49 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
             t_util.load_object_state(active_object)
             location = active_object.location
 
-            obj = t_util.freeze(context, self.resolution, self.freeze_type)
+            freeze_type = self.freeze_type
+            if freeze_type == "GPENCIL":
+                # gpencilに変換する時に色々最適化する
+                obj = t_util.freeze(context, self.resolution, "MESH")
+                obj_name = obj.name
+
+                obj.modifiers.clear()
+
+                decimate: DecimateModifier = obj.modifiers.new(
+                    name="gp_pre_decimate", type="DECIMATE"
+                )
+                decimate.decimate_type = "DISSOLVE"
+                decimate.angle_limit = math.radians(1)
+
+                edge_split: EdgeSplitModifier = obj.modifiers.new(
+                    name="gp_pre_edge_split", type="EDGE_SPLIT"
+                )
+                edge_split.use_edge_angle = False
+                edge_split.use_edge_sharp = False
+
+                _override = context.copy()
+                _override["object"] = obj
+                _override["active_object"] = obj
+
+                for mod in obj.modifiers:
+                    bpy.ops.object.modifier_apply(_override, modifier=mod.name)
+
+                # edit mode でいじる
+                bpy.ops.object.select_all(action="DESELECT")
+                obj.select_set(True)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode="EDIT")
+                bpy.ops.mesh.select_mode(type="EDGE")
+                bpy.ops.mesh.select_all(action="SELECT")
+                bpy.ops.mesh.region_to_loop()
+                bpy.ops.mesh.mark_seam(clear=False)
+                bpy.ops.object.mode_set(mode="OBJECT")
+                # gpencilに変換するとオブジェクトの名前が変わってしまうのでactive_objectを取る
+                bpy.ops.object.convert(target="GPENCIL", seams=True, faces=True)
+                obj = context.active_object
+
+            else:
+                obj = t_util.freeze(context, self.resolution, freeze_type)
 
             obj.name = f"{t_util.state['name']}.freeze"
             obj.parent = None
@@ -1026,6 +1073,10 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
         mesh_freeze_prop.freeze_type = "MESH"
         curve_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="カーブに変換")
         curve_freeze_prop.freeze_type = "CURVE"
+        gpencil_freeze_prop = layout.operator(
+            TATEGAKI_OT_Freeze.bl_idname, text="gpencilに変換"
+        )
+        gpencil_freeze_prop.freeze_type = "GPENCIL"
 
 
 def tategaki_menu(self, context):
