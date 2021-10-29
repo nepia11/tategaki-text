@@ -1000,7 +1000,7 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 bpy.ops.mesh.select_mode(type="EDGE")
                 bpy.ops.mesh.select_all(action="SELECT")
                 bpy.ops.mesh.region_to_loop()
-                bpy.ops.mesh.mark_seam(clear=False)
+                bpy.ops.mesh.mark_seam()
                 bpy.ops.object.mode_set(mode="OBJECT")
                 # gpencilに変換するとオブジェクトの名前が変わってしまうのでactive_objectを取る
                 bpy.ops.object.convert(target="GPENCIL", seams=True, faces=True)
@@ -1012,8 +1012,12 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
             obj.name = f"{t_util.state['name']}.freeze"
             obj.parent = None
             collection = t_util.get_collection(t_util.state["name"])
-            collection.objects.unlink(obj)
-            context.scene.collection.objects.link(obj)
+            if obj in list(collection.objects):
+                collection.objects.unlink(obj)
+            if obj in list(context.collection.objects):
+                pass
+            else:
+                context.scene.collection.objects.link(obj)
             obj.location = location
 
             if self.keep_original is False:
