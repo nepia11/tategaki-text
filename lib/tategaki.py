@@ -371,10 +371,12 @@ class TategakiTextUtil:
 
         for i, text_object in enumerate(text_line):
             # text_object: Object
-            hint = self.state["kerning_hints"].get(text_object.name)
+            # hintはfont.character形式で保存する
+            hint = self.state["kerning_hints"].get(text_object.data.name)
             if hint is None:
+                logger.debug(f"{text_object.data.name} hint is None")
                 hint = self.calc_kerning_hint(text_object)
-                self.state["kerning_hints"].update({text_object.name: hint})
+                self.state["kerning_hints"].update({text_object.data.name: hint})
 
             current_str_type = self.decision_special_character(text_object.data.body)
 
@@ -480,7 +482,7 @@ class TategakiTextUtil:
             body_object_name_list.append(line_names)
         state["body_object_name_list"] = body_object_name_list
         state["line_containers"] = line_containers
-        self.update_kerning_hint()
+        self.update_kerning_hint(state)
         self.set_state(state)
         # シーンにリンク
         if bpy.context.scene.collection.children.get(collection.name) is None:
@@ -646,7 +648,7 @@ class TategakiTextUtil:
             text_line = list(line_container.children)
             text_line.sort(key=object_sort_function)
             # 行ごとのヒント情報を計算
-            line_hints = {obj.name: calc_kerning_hint(obj) for obj in text_line}
+            line_hints = {obj.data.name: calc_kerning_hint(obj) for obj in text_line}
             kerning_hints.update(line_hints)
             # logger.debug(line_hints)
         # logger.debug(kerning_hints)
