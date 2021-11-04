@@ -140,31 +140,36 @@ def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types
     return _converted_object
 
 
-def convert_to_curve(
-    obj: bpy.types.Object, parent_inheritance=True
-) -> bpy.types.Object:
-    """
-    変換可能なオブジェクトをカーブオブジェクトに変換する
-    うまく行かない
-    :return converted_object
-    """
-    curve = obj.to_curve(bpy.context.evaluated_depsgraph_get())
-    if curve is None:
-        curve = bpy.data.curves.new("empty_curve", "CURVE")
-    else:
-        curve = curve.copy()
-    _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", curve)
-    bpy.context.scene.collection.objects.link(_converted_object)
-    # transform
-    _converted_object.location = obj.location
-    _converted_object.rotation_euler = obj.rotation_euler
-    _converted_object.scale = obj.scale
-    # material
-    if len(obj.data.materials) != 0:
-        material_names = obj.material_slots.keys()
-        for i, name in enumerate(material_names):
-            material = bpy.data.materials.get(name)
-            _converted_object.data.materials[i] = material
-    if parent_inheritance:
-        _converted_object.parent = obj.parent
-    return _converted_object
+@timer
+def mesh_to_gpencil(mesh: bpy.types.Mesh):
+    # initialize gpencil data
+    name = random_name(8)
+    gpencil_data = bpy.data.grease_pencils.new(name)
+    gp_layer = gpencil_data.layers.new("Fill")
+    gp_frame = gp_layer.frames.new(frame_number=0, active=True)
+    gp_strokes = gp_frame.strokes
+
+    # polygons to strokes
+    polygon: bpy.types.MeshPolygon
+    for polygon in mesh.polygons:
+        # polygonの頂点座標を取得
+        vers = [mesh.vertices[index].co for index in polygon.vertices]
+        stroke = gp_strokes.new()
+        stroke.points.add(len(vers))
+        po: bpy.types.GPencilStrokePoint
+        for i, po in enumerate(stroke.points):
+            po.co = vers[i]
+
+        stroke.points.add(1)
+        stroke.points[-1].co = vers[0]
+
+        stroke.material_index = 0
+
+    # strokes assign fill material
+    material = bpy.data.materials.new(name)
+    bpy.data.materials.create_gpencil_data(material)
+    material.grease_pencil.show_fill = True
+    material.grease_pencil.show_stroke = False
+    gpencil_data.materials.append(material)
+
+    return gpencil_data

@@ -13,7 +13,13 @@ from bpy.types import (
 )
 import mathutils
 from logging import getLogger
-from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
+from .util import (
+    random_name,
+    timer,
+    mesh_transform_apply,
+    convert_to_mesh,
+    mesh_to_gpencil,
+)
 import os
 import pprint
 from typing import TypedDict, Final
@@ -1061,9 +1067,11 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 bpy.ops.mesh.mark_seam()
                 bpy.ops.object.mode_set(mode="OBJECT")
                 # gpencilに変換するとオブジェクトの名前が変わってしまうのでactive_objectを取る
-                bpy.ops.object.convert(target="GPENCIL", seams=True, faces=True)
-                obj = context.active_object
-
+                # bpy.ops.object.convert(target="GPENCIL", seams=True, faces=True)
+                # obj = context.active_object
+                # mesh_to_gpencil実装
+                gpencil_data = mesh_to_gpencil(obj.data)
+                obj = bpy.data.objects.new(obj_name, gpencil_data)
             else:
                 obj = t_util.freeze(context, self.resolution, freeze_type)
 
