@@ -1056,19 +1056,6 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 for mod in obj.modifiers:
                     bpy.ops.object.modifier_apply(_override, modifier=mod.name)
 
-                # edit mode でいじる
-                bpy.ops.object.select_all(action="DESELECT")
-                obj.select_set(True)
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.mode_set(mode="EDIT")
-                bpy.ops.mesh.select_mode(type="EDGE")
-                bpy.ops.mesh.select_all(action="SELECT")
-                bpy.ops.mesh.region_to_loop()
-                bpy.ops.mesh.mark_seam()
-                bpy.ops.object.mode_set(mode="OBJECT")
-                # gpencilに変換するとオブジェクトの名前が変わってしまうのでactive_objectを取る
-                # bpy.ops.object.convert(target="GPENCIL", seams=True, faces=True)
-                # obj = context.active_object
                 # mesh_to_gpencil実装
                 gpencil_data = mesh_to_gpencil(obj.data)
                 obj = bpy.data.objects.new(obj_name, gpencil_data)

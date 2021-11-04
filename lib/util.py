@@ -124,16 +124,19 @@ def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types
         mesh = mesh.copy()
     _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", mesh)
     bpy.context.scene.collection.objects.link(_converted_object)
+
     # transform
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler
     _converted_object.scale = obj.scale
+
     # material
     if len(mesh.materials) != 0:
         material_names = obj.material_slots.keys()
         for i, name in enumerate(material_names):
             material = bpy.data.materials.get(name)
             _converted_object.data.materials[i] = material
+
     # parent
     if parent_inheritance:
         _converted_object.parent = obj.parent
@@ -156,10 +159,13 @@ def mesh_to_gpencil(mesh: bpy.types.Mesh):
         vers = [mesh.vertices[index].co for index in polygon.vertices]
         stroke = gp_strokes.new()
         stroke.points.add(len(vers))
+
+        # strokeのpointを生成して頂点情報を書き込む
         po: bpy.types.GPencilStrokePoint
         for i, po in enumerate(stroke.points):
             po.co = vers[i]
 
+        # strokeをきれいに閉じるためにpointを一個足す
         stroke.points.add(1)
         stroke.points[-1].co = vers[0]
 
@@ -169,6 +175,7 @@ def mesh_to_gpencil(mesh: bpy.types.Mesh):
 
     # strokes assign fill material
     material = bpy.data.materials.new(name)
+    # これをしないとgpencil用のマテリアル設定ができない
     bpy.data.materials.create_gpencil_data(material)
     material.grease_pencil.show_fill = True
     material.grease_pencil.show_stroke = False
