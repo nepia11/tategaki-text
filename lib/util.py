@@ -164,6 +164,8 @@ def mesh_to_gpencil(mesh: bpy.types.Mesh):
         stroke.points[-1].co = vers[0]
 
         stroke.material_index = 0
+        # fill形状が壊れるので内部面情報を更新する
+        stroke.points.update()
 
     # strokes assign fill material
     material = bpy.data.materials.new(name)
