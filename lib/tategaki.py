@@ -763,12 +763,13 @@ class TategakiTextUtil:
 ######### Operators ###########
 
 
-class TATEGAKI_OT_AddText(bpy.types.Operator):
+class TATEGAKI_OT_ConvertToTategakiText(bpy.types.Operator):
     """縦書きテキストオブジェクトを追加"""
 
-    bl_idname = "tategaki.add_text"
-    bl_label = "add tategaki text"
-    bl_description = "アクティブなテキストオブジェクトから縦書きテキストオブジェクトを生成"
+    bl_idname = "tategaki.convert_text"
+    bl_label = "Convert to vertical text"
+    bl_description = "Create a vertical text object from the active text object."
+
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -796,8 +797,8 @@ class TATEGAKI_OT_Duplicate(bpy.types.Operator):
     """縦書きテキストオブジェクトを複製"""
 
     bl_idname = "tategaki.duplicate"
-    bl_label = "duplicate tategaki text"
-    bl_description = "アクティブなテキストオブジェクトから縦書きテキストオブジェクトを生成"
+    bl_label = "Duplicate vertical text"
+    bl_description = "Duplicate the active vertical text object"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -849,18 +850,20 @@ class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
 
     bl_idname = "tategaki.update_chr_spacing"
     bl_label = "update character spacing"
-    bl_description = "縦書きテキストの文字間隔と自動カーニングオプションを更新する"
+    bl_description = (
+        "Update character spacing and auto-kerning options for vertical text"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     auto_kerning: bpy.props.BoolProperty(
         name="auto kerning",
-        description="自動的に文字詰めをする",
+        description="Automatic character spacing.",
         default=False,
     )
 
     chr_spacing: bpy.props.FloatProperty(
         name="character spacing",
-        description="文字間隔",
+        description="character spacing",
         default=0.5,
     )
 
@@ -897,12 +900,12 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
 
     bl_idname = "tategaki.update_line_spacing"
     bl_label = "update line spacing"
-    bl_description = "縦書きテキストの行間を更新する"
+    bl_description = "Update line spacing for Vertical text."
     bl_options = {"REGISTER", "UNDO"}
 
     line_spacing: bpy.props.FloatProperty(
         name="line spacing",
-        description="行間隔",
+        description="line spacing",
         default=1,
     )
 
@@ -934,17 +937,18 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
             return {"CANCELLED"}
 
 
-class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
+class TATEGAKI_OT_UpdateLineCharacterLimit(bpy.types.Operator):
     """縦書きテキストの1行あたりの文字数制限を更新する"""
 
-    bl_idname = "tategaki.update_line_limit_length"
-    bl_label = "update line limit length"
-    bl_description = "縦書きテキストの1行あたりの文字数制限を更新する"
+    bl_idname = "tategaki.update_line_character_limit"
+    bl_label = "update line character limit"
+    bl_description = "Update the character limit per line for vertical text."
+
     bl_options = {"REGISTER", "UNDO"}
 
     limit_length: bpy.props.IntProperty(
-        name="line limit length",
-        description="行文字数制限",
+        name="line character limit",
+        description="line character limit",
         default=20,
         min=1,
         soft_max=100,
@@ -983,7 +987,7 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
 
     bl_idname = "tategaki.freeze"
     bl_label = "freeze"
-    bl_description = "縦書きテキストオブジェクトをメッシュ、カーブ、gpencilに変換する"
+    bl_description = "Convert vertical text objects to meshes, curves, and gpencils"
     bl_options = {"REGISTER", "UNDO"}
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
@@ -1106,7 +1110,7 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
     """ツールの一覧メニュー"""
 
     bl_label = "Tategaki Tools"
-    bl_idname = "tategaki.menu"
+    bl_idname = "TATEGAKI_MT_Tools"
 
     # 本クラスの処理が実行可能かを判定する
     @classmethod
@@ -1123,21 +1127,16 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
 
     def draw(self, context):
         layout = self.layout
-        layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
-        layout.operator(TATEGAKI_OT_Duplicate.bl_idname, text="縦書きテキストを複製")
+        layout.operator(TATEGAKI_OT_ConvertToTategakiText.bl_idname)
+        layout.operator(TATEGAKI_OT_Duplicate.bl_idname)
         layout.separator()
-        layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname, text="字間調整")
-        layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname, text="行間調整")
-        layout.operator(TATEGAKI_OT_UpdateLineLimitLength.bl_idname, text="行文字数調整")
+        layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname)
+        layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname)
+        layout.operator(TATEGAKI_OT_UpdateLineCharacterLimit.bl_idname)
         layout.separator()
-        mesh_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="メッシュに変換")
-        mesh_freeze_prop.freeze_type = "MESH"
-        curve_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="カーブに変換")
-        curve_freeze_prop.freeze_type = "CURVE"
-        gpencil_freeze_prop = layout.operator(
-            TATEGAKI_OT_Freeze.bl_idname, text="gpencilに変換"
+        layout.operator_menu_enum(
+            TATEGAKI_OT_Freeze.bl_idname, "freeze_type", text="Convert To"
         )
-        gpencil_freeze_prop.freeze_type = "GPENCIL"
 
 
 def tategaki_menu(self, context):
@@ -1150,10 +1149,10 @@ def tategaki_menu(self, context):
 
 classses = [
     TATEGAKI_MT_Tools,
-    TATEGAKI_OT_AddText,
+    TATEGAKI_OT_ConvertToTategakiText,
     TATEGAKI_OT_UpdateChrSpacing,
     TATEGAKI_OT_UpdateLineSpacing,
-    TATEGAKI_OT_UpdateLineLimitLength,
+    TATEGAKI_OT_UpdateLineCharacterLimit,
     TATEGAKI_OT_Freeze,
     TATEGAKI_OT_Duplicate,
 ]
@@ -1161,6 +1160,7 @@ tools: list = []
 
 
 def register():
+
     for c in classses:
         bpy.utils.register_class(c)
     for t in tools:

@@ -1,12 +1,15 @@
 import importlib
 from logging import getLogger, StreamHandler, Formatter, handlers, DEBUG, INFO
-from typing import Final
 import sys
 import os
 import datetime
 
 # import bpy
 
+module_names = [
+    "translations",
+    "tategaki",
+]
 
 # アドオン情報
 bl_info = {
@@ -21,11 +24,6 @@ bl_info = {
     "tracker_url": "",
     "category": "Object",
 }
-
-module_names = [
-    "tategaki",
-    "translations",
-]
 
 
 LOGLEVEL = DEBUG
@@ -74,19 +72,16 @@ logger.debug(namespace)
 
 
 def register():
+    print(__name__)
     for module in namespace.values():
         module.register()
-    _name = bl_info["name"]
-    _version = bl_info["version"]
-    logger.info(f"registered {_name}:version{_version}")
+    logger.info(f"registered {bl_info['name']}:version{bl_info['version']}")
 
 
 def unregister():
     for module in namespace.values():
         module.unregister()
-    _name = bl_info["name"]
-    _version = bl_info["version"]
-    logger.info(f"unregistered {_name}:version{_version}")
+    logger.info(f"unregistered {bl_info['name']}:version{bl_info['version']}")
 
 
 if __name__ == "__main__":
