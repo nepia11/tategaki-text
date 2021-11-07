@@ -1075,6 +1075,8 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context):
         active_object: Object = context.active_object
+        wm = context.window_manager
+        wm.progress_begin(0, 5)
 
         if TATEGAKI in active_object.keys():
 
@@ -1082,11 +1084,15 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
             t_util.load_object_state(active_object)
             location = active_object.location
 
+            wm.progress_update(1)
+
             freeze_type = self.freeze_type
             if freeze_type == "GPENCIL":
                 # gpencilに変換する時に色々最適化する
                 obj = t_util.freeze(context, self.resolution, "MESH")
                 obj_name = obj.name
+
+                wm.progress_update(2)
 
                 obj.modifiers.clear()
 
@@ -1109,11 +1115,16 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 for mod in obj.modifiers:
                     bpy.ops.object.modifier_apply(_override, modifier=mod.name)
 
+                wm.progress_update(3)
+
                 # mesh_to_gpencil実装
                 gpencil_data = mesh_to_gpencil(obj.data)
                 obj = bpy.data.objects.new(obj_name, gpencil_data)
+
+                wm.progress_update(4)
             else:
                 obj = t_util.freeze(context, self.resolution, freeze_type)
+                wm.progress_update(4)
 
             obj.name = f"{t_util.state['name']}.freeze"
             obj.parent = None
@@ -1139,6 +1150,9 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 bpy.ops.outliner.orphans_purge(
                     do_local_ids=True, do_linked_ids=True, do_recursive=True
                 )
+
+                wm.progress_update(5)
+                wm.progress_end()
 
                 return {"FINISHED"}
             else:
