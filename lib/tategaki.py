@@ -799,6 +799,59 @@ class TATEGAKI_OT_ConvertToTategakiText(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class TATEGAKI_OT_Remove(bpy.types.Operator):
+    """縦書きテキストオブジェクトを削除"""
+
+    bl_idname = "tategaki.remove"
+    bl_label = "Remove"
+    bl_description = ""
+
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.object.keys():
+            return True
+        else:
+            return False
+
+    # メニューを実行したときに呼ばれるメソッド
+    def execute(self, context):
+        # setup
+        t_util = TategakiTextUtil()
+        tategaki_obj = context.object
+        state = t_util.load_object_state(tategaki_obj)
+
+        # 削除するオブジェクトを取得する
+        collection = bpy.data.collections.get(state["name"])
+        deletion_objects = []
+
+        if collection is None:
+            pass
+        else:
+            deletion_objects = list(collection.all_objects)
+
+        # removed = [o.name for o in deletion_objects]
+
+        # 削除
+        del_obj: Object
+        for del_obj in deletion_objects:
+            del_obj.parent = None
+            bpy.data.objects.remove(del_obj)
+
+        bpy.data.collections.remove(collection)
+
+        # clean
+        bpy.ops.outliner.orphans_purge(
+            do_local_ids=True, do_linked_ids=True, do_recursive=True
+        )
+
+        # infoにメッセージを通知
+        self.report({"INFO"}, f"execute {self.bl_idname}. removed tategaki object")
+        # 正常終了ステータスを返す
+        return {"FINISHED"}
+
+
 class TATEGAKI_OT_Duplicate(bpy.types.Operator):
     """縦書きテキストオブジェクトを複製"""
 
