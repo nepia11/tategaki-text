@@ -10,6 +10,7 @@ import zipfile
 file_list = [
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "__init__.py",
     "lib",
 ]
