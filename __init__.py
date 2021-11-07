@@ -15,7 +15,7 @@ module_names = [
 bl_info = {
     "name": "Tategaki Text Tools",
     "author": "nepia",
-    "version": (2, 0, 0),
+    "version": (3, 0, 0),
     "blender": (2, 93, 0),
     "location": "view3d>object_context_menu>Tategaki Tools",
     "description": "テキストオブジェクトを縦書きに変換、細かな調整をするツール郡です",

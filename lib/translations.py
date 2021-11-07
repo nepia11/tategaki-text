@@ -76,6 +76,11 @@ keys = [
         "key": "Convert vertical text objects to meshes, curves, and gpencils",
         "ja_JP": "縦書きテキストオブジェクトをメッシュ、カーブ、gpencilに変換する",
     },
+    {
+        "context": "*",
+        "key": "Deleting a vertical text object",
+        "ja_JP": "縦書きテキストオブジェクトを削除する",
+    },
 ]
 
 

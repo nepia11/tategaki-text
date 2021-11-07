@@ -804,7 +804,7 @@ class TATEGAKI_OT_Remove(bpy.types.Operator):
 
     bl_idname = "tategaki.remove"
     bl_label = "Remove"
-    bl_description = ""
+    bl_description = "Deleting a vertical text object"
 
     bl_options = {"REGISTER", "UNDO"}
 
