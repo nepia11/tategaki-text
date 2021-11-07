@@ -1,3 +1,4 @@
+import math
 import bpy
 from bpy.types import (
     Context,
@@ -7,15 +8,21 @@ from bpy.types import (
     Object,
     VectorFont,
     TextCharacterFormat,
+    DecimateModifier,
+    EdgeSplitModifier,
 )
 import mathutils
 from logging import getLogger
-from .util import random_name, timer, mesh_transform_apply, convert_to_mesh
-from math import pi
+from .util import (
+    random_name,
+    timer,
+    mesh_transform_apply,
+    convert_to_mesh,
+    mesh_to_gpencil,
+)
 import os
 import pprint
-from typing import NamedTuple, TypedDict, Final
-from collections import namedtuple
+from typing import TypedDict, Final
 import re
 
 # setup
@@ -339,7 +346,7 @@ class TategakiTextUtil:
             offset = self.calc_punctuation_offset(center)
             location = mathutils.Vector(location) + mathutils.Vector(offset)
         elif str_type == "rotation":
-            rotation = (0.0, 0.0, 0.0 - pi / 2)
+            rotation = (0.0, 0.0, math.radians(-90))
             # 回転設定
             text_object.rotation_euler = rotation
         # 座標設定
@@ -370,10 +377,12 @@ class TategakiTextUtil:
 
         for i, text_object in enumerate(text_line):
             # text_object: Object
-            hint = self.state["kerning_hints"].get(text_object.name)
+            # hintはfont.character形式で保存する
+            hint = self.state["kerning_hints"].get(text_object.data.name)
             if hint is None:
+                logger.debug(f"{text_object.data.name} hint is None")
                 hint = self.calc_kerning_hint(text_object)
-                self.state["kerning_hints"].update({text_object.name: hint})
+                self.state["kerning_hints"].update({text_object.data.name: hint})
 
             current_str_type = self.decision_special_character(text_object.data.body)
 
@@ -425,16 +434,9 @@ class TategakiTextUtil:
     def convert_text_object(self, text_object: Object):
         """テキストオブジェクトから縦書きテキストに変換する"""
         # コレクションの取得
-        collection_name = f"{text_object.name}.{random_name(8)}"
-        collection = self.get_collection(collection_name)
-        collection_name = collection.name
-        # テキストオブジェクトをペアレントするエンプティの作成
-        container = self.get_empty(collection_name=collection_name)
-        container.location = bpy.context.scene.cursor.location
-        container.name = collection_name
         body = text_object.data.body
         # stateの初期化
-        state = self.init_state(container=container, original=text_object)
+        state = self.init_state(original=text_object)
         # テキストオブジェクトからプロパティを生成
         text_props = self.text_to_props(text_object)
         # 行文字数制限で改行する
@@ -442,17 +444,35 @@ class TategakiTextUtil:
         state["body"] = body.splitlines()
         state["text_props"] = text_props
         state["auto_kerning"] = False
-        state["name"] = collection_name
-        tag = state["tag"]
+        state["name"] = f"{text_object.name}.{state['tag']}"
+        state["limit_length"] = 20
         self.set_state(state)
         # apply
         # 改行済み文字propsがあるのでこれをよしなにする
+        container = self.generate_tategaki_text_from_state(state)
+        return container
+
+    def generate_tategaki_text_from_state(self, state: TategakiState):
         body_object_name_list = []
         line_containers = {}
         chr_count = 0
+        mod_text_props = self.modify_text_props(
+            state["text_props"], state["limit_length"]
+        )
+        # コレクションの取得
+        collection_name = state["name"]
+        collection = self.get_collection(collection_name)
+        collection_name = collection.name
+        # テキストオブジェクトをペアレントするエンプティの作成
+        container = self.get_empty(collection_name=collection_name)
+        container.location = bpy.context.scene.cursor.location
+        container.name = collection_name
+        state["container"] = container
+        tag = state["tag"]
         for i0, line in enumerate(mod_text_props):
             line_names: list[str] = []
             line_container = self.get_line_container(index=i0)
+            line_container.parent = container
             line_containers.update({str(i0): line_container.name})
             for i1, chr_prop in enumerate(line):
                 character = chr_prop["character"]
@@ -468,7 +488,7 @@ class TategakiTextUtil:
             body_object_name_list.append(line_names)
         state["body_object_name_list"] = body_object_name_list
         state["line_containers"] = line_containers
-        self.update_kerning_hint()
+        self.update_kerning_hint(state)
         self.set_state(state)
         # シーンにリンク
         if bpy.context.scene.collection.children.get(collection.name) is None:
@@ -634,7 +654,7 @@ class TategakiTextUtil:
             text_line = list(line_container.children)
             text_line.sort(key=object_sort_function)
             # 行ごとのヒント情報を計算
-            line_hints = {obj.name: calc_kerning_hint(obj) for obj in text_line}
+            line_hints = {obj.data.name: calc_kerning_hint(obj) for obj in text_line}
             kerning_hints.update(line_hints)
             # logger.debug(line_hints)
         # logger.debug(kerning_hints)
@@ -668,7 +688,7 @@ class TategakiTextUtil:
         # logger.debug(pprint.pformat(objects))
         body_len = sum([len(s) for s in self.state["body"]])
         objects_len = len(objects)
-        logger.debug(f"body len:{body_len}, objects len:{objects_len}")
+        logger.info(f"body len:{body_len}, objects len:{objects_len}")
 
         # freeze_typeに応じてカーブかメッシュに変換
         if freeze_type == "MESH":
@@ -721,7 +741,7 @@ class TategakiTextUtil:
                 empty_object.data.materials.append(mat)
 
         else:
-            logger.debug(f"freeze_type='{freeze_type}' is invalid. 'MESH' or 'CURVE'")
+            logger.info(f"freeze_type='{freeze_type}' is invalid. 'MESH' or 'CURVE'")
             raise TypeError
 
         empty_object.parent = self.state["container"]
@@ -749,12 +769,13 @@ class TategakiTextUtil:
 ######### Operators ###########
 
 
-class TATEGAKI_OT_AddText(bpy.types.Operator):
+class TATEGAKI_OT_ConvertToTategakiText(bpy.types.Operator):
     """縦書きテキストオブジェクトを追加"""
 
-    bl_idname = "tategaki.add_text"
-    bl_label = "add tategaki text"
-    bl_description = "アクティブなテキストオブジェクトから縦書きテキストオブジェクトを生成"
+    bl_idname = "tategaki.convert_text"
+    bl_label = "Convert to vertical text"
+    bl_description = "Create a vertical text object from the active text object."
+
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -778,23 +799,130 @@ class TATEGAKI_OT_AddText(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class TATEGAKI_OT_Remove(bpy.types.Operator):
+    """縦書きテキストオブジェクトを削除"""
+
+    bl_idname = "tategaki.remove"
+    bl_label = "Remove"
+    bl_description = "Deleting a vertical text object"
+
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.object.keys():
+            return True
+        else:
+            return False
+
+    # メニューを実行したときに呼ばれるメソッド
+    def execute(self, context):
+        # setup
+        t_util = TategakiTextUtil()
+        tategaki_obj = context.object
+        state = t_util.load_object_state(tategaki_obj)
+
+        # 削除するオブジェクトを取得する
+        collection = bpy.data.collections.get(state["name"])
+        deletion_objects = []
+
+        if collection is None:
+            pass
+        else:
+            deletion_objects = list(collection.all_objects)
+
+        # removed = [o.name for o in deletion_objects]
+
+        # 削除
+        del_obj: Object
+        for del_obj in deletion_objects:
+            del_obj.parent = None
+            bpy.data.objects.remove(del_obj)
+
+        bpy.data.collections.remove(collection)
+
+        # clean
+        bpy.ops.outliner.orphans_purge(
+            do_local_ids=True, do_linked_ids=True, do_recursive=True
+        )
+
+        # infoにメッセージを通知
+        self.report({"INFO"}, f"execute {self.bl_idname}. removed tategaki object")
+        # 正常終了ステータスを返す
+        return {"FINISHED"}
+
+
+class TATEGAKI_OT_Duplicate(bpy.types.Operator):
+    """縦書きテキストオブジェクトを複製"""
+
+    bl_idname = "tategaki.duplicate"
+    bl_label = "Duplicate vertical text"
+    bl_description = "Duplicate the active vertical text object"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        if TATEGAKI in context.active_object.keys():
+            return True
+        else:
+            return False
+
+    # メニューを実行したときに呼ばれるメソッド
+    def execute(self, context):
+        # 初期化など
+        t_util = TategakiTextUtil()
+        obj = context.object
+        state = t_util.load_object_state(obj)
+        old_name = state["name"]
+        old_tag = state["tag"]
+        new_tag = random_name(8)
+        orig_name = old_name.replace(f".{old_tag}", "")
+        new_name = f"{orig_name}.{new_tag}"
+
+        logger.debug(f"oname:{old_name},otag:{old_tag},nname:{new_name},ntag{new_tag}")
+
+        # 新しいタグと名前をつける
+        state["name"] = new_name
+        state["tag"] = new_tag
+
+        # 生成
+        t_util.set_state(state)
+        container = t_util.generate_tategaki_text_from_state(state)
+
+        # 行間字間適応
+        t_util.update_chr_spacing()
+        t_util.update_lines_spacing()
+
+        # 選択状態を操作
+        bpy.ops.object.select_all(action="DESELECT")
+        container.select_set(True)
+        context.view_layer.objects.active = container
+
+        # infoにメッセージを通知
+        self.report({"INFO"}, f"execute {self.bl_idname}")
+        # 正常終了ステータスを返す
+        return {"FINISHED"}
+
+
 class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
     """縦書きテキストの文字間隔と自動カーニングオプションを更新する"""
 
     bl_idname = "tategaki.update_chr_spacing"
     bl_label = "update character spacing"
-    bl_description = "縦書きテキストの文字間隔と自動カーニングオプションを更新する"
+    bl_description = (
+        "Update character spacing and auto-kerning options for vertical text"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     auto_kerning: bpy.props.BoolProperty(
         name="auto kerning",
-        description="自動的に文字詰めをする",
+        description="Automatic character spacing.",
         default=False,
     )
 
     chr_spacing: bpy.props.FloatProperty(
         name="character spacing",
-        description="文字間隔",
+        description="character spacing",
         default=0.5,
     )
 
@@ -806,27 +934,20 @@ class TATEGAKI_OT_UpdateChrSpacing(bpy.types.Operator):
             return False
 
     def execute(self, context):
-        t_util = self.t_util
-        if context.object != self.obj:
-            return {"CANCELLED"}
-        else:
-            self.state["chr_spacing"] = self.chr_spacing
-            self.state["auto_kerning"] = self.auto_kerning
-            t_util.set_state(self.state)
-            t_util.update_chr_spacing()
-            # t_util.save_state()  # 検証する
+        obj = context.object
+        t_util = TategakiTextUtil()
+        state = t_util.load_object_state(obj)
+        state["chr_spacing"] = self.chr_spacing
+        state["auto_kerning"] = self.auto_kerning
+        t_util.set_state(state)
+        t_util.update_chr_spacing()
+        t_util.save_state()  # 検証する
 
         return {"FINISHED"}
 
     def invoke(self, context: Context, event):
         if self.poll(context):
             wm = context.window_manager
-            self.obj = context.object
-            self.t_util = TategakiTextUtil()
-            self.first_state = self.t_util.load_object_state(self.obj)
-            if self.t_util.state["kerning_hints"] == {}:
-                self.t_util.update_kerning_hint()
-            self.state = self.t_util.get_state()
             return wm.invoke_props_popup(self, event)
         else:
             self.report({"WARNING"}, "No active object, could not finish")
@@ -838,12 +959,12 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
 
     bl_idname = "tategaki.update_line_spacing"
     bl_label = "update line spacing"
-    bl_description = "縦書きテキストの行間を更新する"
+    bl_description = "Update line spacing for Vertical text."
     bl_options = {"REGISTER", "UNDO"}
 
     line_spacing: bpy.props.FloatProperty(
         name="line spacing",
-        description="行間隔",
+        description="line spacing",
         default=1,
     )
 
@@ -855,41 +976,38 @@ class TATEGAKI_OT_UpdateLineSpacing(bpy.types.Operator):
             return False
 
     def execute(self, context):
-        t_util = self.t_util
-        if context.object != self.obj:
-            return {"CANCELLED"}
-        else:
-            self.state["line_spacing"] = self.line_spacing
-            t_util.set_state(self.state)
-            t_util.update_lines_spacing()
-            # t_util.save_state()  # 検証する
+
+        obj = context.object
+        t_util = TategakiTextUtil()
+        state = t_util.load_object_state(obj)
+        state["line_spacing"] = self.line_spacing
+        t_util.set_state(state)
+        t_util.update_lines_spacing()
+        t_util.save_state()  # 検証する
 
         return {"FINISHED"}
 
     def invoke(self, context: Context, event):
         if self.poll(context):
             wm = context.window_manager
-            self.obj = context.object
-            self.t_util = TategakiTextUtil()
-            self.first_state = self.t_util.load_object_state(self.obj)
-            self.state = self.t_util.get_state()
             return wm.invoke_props_popup(self, event)
         else:
             self.report({"WARNING"}, "No active object, could not finish")
             return {"CANCELLED"}
 
 
-class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
+class TATEGAKI_OT_UpdateLineCharacterLimit(bpy.types.Operator):
     """縦書きテキストの1行あたりの文字数制限を更新する"""
 
-    bl_idname = "tategaki.update_line_limit_length"
-    bl_label = "update line limit length"
-    bl_description = "縦書きテキストの1行あたりの文字数制限を更新する"
+    bl_idname = "tategaki.update_line_character_limit"
+    bl_label = "update line character limit"
+    bl_description = "Update the character limit per line for vertical text."
+
     bl_options = {"REGISTER", "UNDO"}
 
     limit_length: bpy.props.IntProperty(
-        name="line limit length",
-        description="行文字数制限",
+        name="line character limit",
+        description="line character limit",
         default=20,
         min=1,
         soft_max=100,
@@ -924,11 +1042,11 @@ class TATEGAKI_OT_UpdateLineLimitLength(bpy.types.Operator):
 
 
 class TATEGAKI_OT_Freeze(bpy.types.Operator):
-    """縦書きテキストオブジェクトをメッシュまたはカーブに変換する"""
+    """縦書きテキストオブジェクトをメッシュ、カーブ、gpencilに変換する"""
 
     bl_idname = "tategaki.freeze"
     bl_label = "freeze"
-    bl_description = "縦書きテキストオブジェクトをメッシュまたはカーブに変換する"
+    bl_description = "Convert vertical text objects to meshes, curves, and gpencils"
     bl_options = {"REGISTER", "UNDO"}
 
     keep_original: bpy.props.BoolProperty(name="keep_original", default=False)
@@ -938,7 +1056,11 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
     freeze_type: bpy.props.EnumProperty(
         name="freeze_type",
         default="MESH",
-        items=[("MESH", "MESH", ""), ("CURVE", "CURVE", "")],
+        items=[
+            ("MESH", "MESH", ""),
+            ("CURVE", "CURVE", ""),
+            ("GPENCIL", "GPENCIL", ""),
+        ],
     )
 
     @classmethod
@@ -953,6 +1075,8 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context):
         active_object: Object = context.active_object
+        wm = context.window_manager
+        wm.progress_begin(0, 5)
 
         if TATEGAKI in active_object.keys():
 
@@ -960,13 +1084,59 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
             t_util.load_object_state(active_object)
             location = active_object.location
 
-            obj = t_util.freeze(context, self.resolution, self.freeze_type)
+            wm.progress_update(1)
+
+            freeze_type = self.freeze_type
+            if freeze_type == "GPENCIL":
+                # gpencilに変換する時に色々最適化する
+                obj = t_util.freeze(context, self.resolution, "MESH")
+                obj_name = obj.name
+
+                wm.progress_update(2)
+
+                obj.modifiers.clear()
+
+                decimate: DecimateModifier = obj.modifiers.new(
+                    name="gp_pre_decimate", type="DECIMATE"
+                )
+                decimate.decimate_type = "DISSOLVE"
+                decimate.angle_limit = math.radians(1)
+
+                edge_split: EdgeSplitModifier = obj.modifiers.new(
+                    name="gp_pre_edge_split", type="EDGE_SPLIT"
+                )
+                edge_split.use_edge_angle = False
+                edge_split.use_edge_sharp = False
+
+                _override = context.copy()
+                _override["object"] = obj
+                _override["active_object"] = obj
+
+                for mod in obj.modifiers:
+                    bpy.ops.object.modifier_apply(_override, modifier=mod.name)
+
+                wm.progress_update(3)
+
+                # mesh_to_gpencil実装
+                gpencil_data = mesh_to_gpencil(obj.data)
+                obj = bpy.data.objects.new(obj_name, gpencil_data)
+
+                wm.progress_update(4)
+            else:
+                obj = t_util.freeze(context, self.resolution, freeze_type)
+                wm.progress_update(4)
 
             obj.name = f"{t_util.state['name']}.freeze"
             obj.parent = None
             collection = t_util.get_collection(t_util.state["name"])
-            collection.objects.unlink(obj)
-            context.scene.collection.objects.link(obj)
+
+            # collectionにあったりなかったりするので分別
+            if obj in list(collection.objects):
+                collection.objects.unlink(obj)
+            if obj in list(context.collection.objects):
+                pass
+            else:
+                context.scene.collection.objects.link(obj)
             obj.location = location
 
             if self.keep_original is False:
@@ -980,6 +1150,9 @@ class TATEGAKI_OT_Freeze(bpy.types.Operator):
                 bpy.ops.outliner.orphans_purge(
                     do_local_ids=True, do_linked_ids=True, do_recursive=True
                 )
+
+                wm.progress_update(5)
+                wm.progress_end()
 
                 return {"FINISHED"}
             else:
@@ -999,7 +1172,7 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
     """ツールの一覧メニュー"""
 
     bl_label = "Tategaki Tools"
-    bl_idname = "tategaki.menu"
+    bl_idname = "TATEGAKI_MT_Tools"
 
     # 本クラスの処理が実行可能かを判定する
     @classmethod
@@ -1016,16 +1189,17 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
 
     def draw(self, context):
         layout = self.layout
-        layout.operator(TATEGAKI_OT_AddText.bl_idname, text="縦書きテキストに変換")
+        layout.operator(TATEGAKI_OT_ConvertToTategakiText.bl_idname)
+        layout.operator(TATEGAKI_OT_Duplicate.bl_idname)
+        layout.operator(TATEGAKI_OT_Remove.bl_idname)
         layout.separator()
-        layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname, text="字間調整")
-        layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname, text="行間調整")
-        layout.operator(TATEGAKI_OT_UpdateLineLimitLength.bl_idname, text="行文字数調整")
+        layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname)
+        layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname)
+        layout.operator(TATEGAKI_OT_UpdateLineCharacterLimit.bl_idname)
         layout.separator()
-        mesh_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="メッシュに変換")
-        mesh_freeze_prop.freeze_type = "MESH"
-        curve_freeze_prop = layout.operator(TATEGAKI_OT_Freeze.bl_idname, text="カーブに変換")
-        curve_freeze_prop.freeze_type = "CURVE"
+        layout.operator_menu_enum(
+            TATEGAKI_OT_Freeze.bl_idname, "freeze_type", text="Convert To"
+        )
 
 
 def tategaki_menu(self, context):
@@ -1038,16 +1212,19 @@ def tategaki_menu(self, context):
 
 classses = [
     TATEGAKI_MT_Tools,
-    TATEGAKI_OT_AddText,
+    TATEGAKI_OT_ConvertToTategakiText,
     TATEGAKI_OT_UpdateChrSpacing,
     TATEGAKI_OT_UpdateLineSpacing,
-    TATEGAKI_OT_UpdateLineLimitLength,
+    TATEGAKI_OT_UpdateLineCharacterLimit,
     TATEGAKI_OT_Freeze,
+    TATEGAKI_OT_Duplicate,
+    TATEGAKI_OT_Remove,
 ]
 tools: list = []
 
 
 def register():
+
     for c in classses:
         bpy.utils.register_class(c)
     for t in tools:

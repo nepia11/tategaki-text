@@ -43,8 +43,8 @@ def calc_vector_length(a: mathutils.Vector, b: mathutils.Vector) -> float:
 def gp_licker(gp_data: bpy.types.GreasePencil, func, state={}):
 
     if type(gp_data) is not bpy.types.GreasePencil:
-        logger.debug("not gpencil")
-        return 1
+        logger.info("not gpencil")
+        raise TypeError
 
     for li, layer in enumerate(gp_data.layers):
         func(state["layers"][li], layer, "layer")
@@ -124,47 +124,61 @@ def convert_to_mesh(obj: bpy.types.Object, parent_inheritance=True) -> bpy.types
         mesh = mesh.copy()
     _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", mesh)
     bpy.context.scene.collection.objects.link(_converted_object)
+
     # transform
     _converted_object.location = obj.location
     _converted_object.rotation_euler = obj.rotation_euler
     _converted_object.scale = obj.scale
+
     # material
     if len(mesh.materials) != 0:
         material_names = obj.material_slots.keys()
         for i, name in enumerate(material_names):
             material = bpy.data.materials.get(name)
             _converted_object.data.materials[i] = material
+
     # parent
     if parent_inheritance:
         _converted_object.parent = obj.parent
     return _converted_object
 
 
-def convert_to_curve(
-    obj: bpy.types.Object, parent_inheritance=True
-) -> bpy.types.Object:
-    """
-    変換可能なオブジェクトをカーブオブジェクトに変換する
-    うまく行かない
-    :return converted_object
-    """
-    curve = obj.to_curve(bpy.context.evaluated_depsgraph_get())
-    if curve is None:
-        curve = bpy.data.curves.new("empty_curve", "CURVE")
-    else:
-        curve = curve.copy()
-    _converted_object = bpy.data.objects.new(f"{obj.name}.{random_name(4)}", curve)
-    bpy.context.scene.collection.objects.link(_converted_object)
-    # transform
-    _converted_object.location = obj.location
-    _converted_object.rotation_euler = obj.rotation_euler
-    _converted_object.scale = obj.scale
-    # material
-    if len(obj.data.materials) != 0:
-        material_names = obj.material_slots.keys()
-        for i, name in enumerate(material_names):
-            material = bpy.data.materials.get(name)
-            _converted_object.data.materials[i] = material
-    if parent_inheritance:
-        _converted_object.parent = obj.parent
-    return _converted_object
+@timer
+def mesh_to_gpencil(mesh: bpy.types.Mesh):
+    # initialize gpencil data
+    name = random_name(8)
+    gpencil_data = bpy.data.grease_pencils.new(name)
+    gp_layer = gpencil_data.layers.new("Fill")
+    gp_frame = gp_layer.frames.new(frame_number=0, active=True)
+    gp_strokes = gp_frame.strokes
+
+    # polygons to strokes
+    polygon: bpy.types.MeshPolygon
+    for polygon in mesh.polygons:
+        # polygonの頂点座標を取得
+        vers = [mesh.vertices[index].co for index in polygon.vertices]
+        stroke = gp_strokes.new()
+        stroke.points.add(len(vers))
+
+        # strokeのpointを生成して頂点情報を書き込む
+        po: bpy.types.GPencilStrokePoint
+        for i, po in enumerate(stroke.points):
+            po.co = vers[i]
+
+        # strokeをきれいに閉じるためにpointを一個足す
+        stroke.points.add(1)
+        stroke.points[-1].co = vers[0]
+
+        stroke.material_index = 0
+        # fill形状が壊れるので内部面情報を更新する
+        stroke.points.update()
+
+    # strokes assign fill material
+    material = bpy.data.materials.new(name)
+    # これをしないとgpencil用のマテリアル設定ができない
+    bpy.data.materials.create_gpencil_data(material)
+    material.grease_pencil.show_fill = True
+    material.grease_pencil.show_stroke = False
+    gpencil_data.materials.append(material)
+
+    return gpencil_data
