@@ -8,6 +8,7 @@
 ### Added
 
 - ops.tategaki.duplicate 実装: 縦書きテキストから新規縦書きテキストを生成
+- ops.tategaki.remove 実装: 縦書きテキストオブジェクトをきれいに削除する
 - ops.tategaki.freeze に gpencil への変換を実装
 - 翻訳を実装(jp/en)
 
