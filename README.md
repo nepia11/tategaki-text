@@ -11,7 +11,7 @@
 
 - オブジェクトコンテキストメニュー(ビューポートで右クリックしたときに開くメニュー) > Tategaki Tools
 
-![](https://i.imgur.com/JJLRHFJ.png)
+[![https://imgur.com/6FyfMbh.png](https://imgur.com/6FyfMbh.png)](https://imgur.com/6FyfMbh.png)
 
 ## 機能
 
