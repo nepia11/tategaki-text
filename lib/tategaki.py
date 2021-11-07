@@ -1191,6 +1191,7 @@ class TATEGAKI_MT_Tools(bpy.types.Menu):
         layout = self.layout
         layout.operator(TATEGAKI_OT_ConvertToTategakiText.bl_idname)
         layout.operator(TATEGAKI_OT_Duplicate.bl_idname)
+        layout.operator(TATEGAKI_OT_Remove.bl_idname)
         layout.separator()
         layout.operator(TATEGAKI_OT_UpdateChrSpacing.bl_idname)
         layout.operator(TATEGAKI_OT_UpdateLineSpacing.bl_idname)
@@ -1217,6 +1218,7 @@ classses = [
     TATEGAKI_OT_UpdateLineCharacterLimit,
     TATEGAKI_OT_Freeze,
     TATEGAKI_OT_Duplicate,
+    TATEGAKI_OT_Remove,
 ]
 tools: list = []
 

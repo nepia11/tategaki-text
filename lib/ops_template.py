@@ -99,7 +99,7 @@ class TEMPLATE_OT_MyTimerEventOperator(bpy.types.Operator):
 
 
 classses = [TEMPLATE_OT_MyTimerEventOperator, TEMPLATE_OT_MyTimerEventOperator]
-tools = []
+tools: list = []
 
 
 def register():
